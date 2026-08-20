@@ -19,6 +19,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY backend ./backend
 COPY --from=frontend-build /app/frontend/front-tom-hanks/dist/front-tom-hanks/browser ./backend/static
 
+COPY start.sh ./
+RUN chmod +x start.sh
+
 EXPOSE 5000
 
-CMD ["sh", "-c", "gunicorn -b 0.0.0.0:${PORT:-5000} backend.app:app"]
+CMD ["./start.sh"]
+
