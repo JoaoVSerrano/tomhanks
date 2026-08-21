@@ -1,0 +1,15 @@
+.git
+.gitignore
+.env
+.env.*
+backend/__pycache__/
+backend/static/
+frontend/front-tom-hanks/node_modules/
+frontend/front-tom-hanks/dist/
+frontend/front-tom-hanks/.angular/
+frontend/front-tom-hanks/.cache/
+frontend/front-tom-hanks/coverage/
+venv/
+*.pyc
+__pycache__/
+.DS_Store
