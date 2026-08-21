@@ -9,7 +9,7 @@ services:
         condition: service_healthy
     environment:
       FLASK_SECRET_KEY: ${FLASK_SECRET_KEY:-change-me}
-      TMDB_API_KEY: ${TMDB_API_KEY:?set TMDB_API_KEY in your environment}
+      TMDB_API_KEY: ${TMDB_API_KEY:-}
       TMDB_LANGUAGE: ${TMDB_LANGUAGE:-pt-BR}
       DB_DRIVER: mysql+mysqlconnector
       DB_HOST: db
