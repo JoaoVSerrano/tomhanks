@@ -1,38 +1,15 @@
-# ── Estágio 1: build do Angular ──────────────────────────────────────────────
-FROM node:22-slim AS frontend-builder
-
-ENV NODE_OPTIONS="--max-old-space-size=512"
-
-WORKDIR /build/frontend
-
-# Instala dependências
-COPY frontend/front-tom-hanks/package*.json ./
-RUN npm install
-
-# Copia o código-fonte e faz o build
-COPY frontend/front-tom-hanks/ ./
-RUN npm run build
-
-# ── Estágio 2: runtime Python/Flask ──────────────────────────────────────────
-FROM python:3.12-slim AS runtime
+FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-# Instala dependências Python
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copia o backend
 COPY alembic.ini ./
 COPY backend ./backend
-
-# Copia os arquivos estáticos gerados pelo Angular para onde o Flask os serve
-COPY --from=frontend-builder /build/frontend/dist/front-tom-hanks/browser ./backend/static
-
-# Copia o script de inicialização
 COPY start.sh ./
 RUN chmod +x start.sh
 
