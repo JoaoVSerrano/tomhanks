@@ -1,11 +1,11 @@
 # ── Estágio 1: build do Angular ──────────────────────────────────────────────
-FROM node:20-alpine AS frontend-builder
+FROM node:22-alpine AS frontend-builder
 
 WORKDIR /build/frontend
 
-# Instala dependências primeiro (melhor cache de camadas)
+# Instala dependências
 COPY frontend/front-tom-hanks/package*.json ./
-RUN npm ci
+RUN npm install --legacy-peer-deps
 
 # Copia o código-fonte e faz o build
 COPY frontend/front-tom-hanks/ ./
