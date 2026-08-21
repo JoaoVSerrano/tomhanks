@@ -3,7 +3,6 @@
 .env
 .env.*
 backend/__pycache__/
-backend/static/
 frontend/front-tom-hanks/node_modules/
 frontend/front-tom-hanks/dist/
 frontend/front-tom-hanks/.angular/
