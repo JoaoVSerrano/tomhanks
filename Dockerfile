@@ -1,11 +1,13 @@
 # ── Estágio 1: build do Angular ──────────────────────────────────────────────
-FROM node:22-alpine AS frontend-builder
+FROM node:22-slim AS frontend-builder
+
+ENV NODE_OPTIONS="--max-old-space-size=512"
 
 WORKDIR /build/frontend
 
 # Instala dependências
 COPY frontend/front-tom-hanks/package*.json ./
-RUN npm install --legacy-peer-deps
+RUN npm install
 
 # Copia o código-fonte e faz o build
 COPY frontend/front-tom-hanks/ ./
