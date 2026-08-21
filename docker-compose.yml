@@ -1,0 +1,53 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tomhanks-app
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      FLASK_SECRET_KEY: ${FLASK_SECRET_KEY:-change-me}
+      TMDB_API_KEY: ${TMDB_API_KEY:?set TMDB_API_KEY in your environment}
+      TMDB_LANGUAGE: ${TMDB_LANGUAGE:-pt-BR}
+      DB_DRIVER: mysql+mysqlconnector
+      DB_HOST: db
+      DB_PORT: 3306
+      DB_USER: ${DB_USER:-tomhanks_user}
+      DB_PASSWORD: ${DB_PASSWORD:-change-me}
+      DB_NAME: ${DB_NAME:-tomhanks}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5000}
+      SESSION_COOKIE_SAMESITE: ${SESSION_COOKIE_SAMESITE:-Lax}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-0}
+      PORT: 5000
+    ports:
+      - "5000:5000"
+    restart: unless-stopped
+
+  db:
+    image: mysql:8.0
+    container_name: tomhanks-db
+    command:
+      - --default-authentication-plugin=mysql_native_password
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    environment:
+      MYSQL_DATABASE: ${DB_NAME:-tomhanks}
+      MYSQL_USER: ${DB_USER:-tomhanks_user}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-change-me}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-change-me-root}
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p$${MYSQL_ROOT_PASSWORD} --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    ports:
+      - "3306:3306"
+    volumes:
+      - tomhanks-mysql-data:/var/lib/mysql
+    restart: unless-stopped
+
+volumes:
+  tomhanks-mysql-data:
