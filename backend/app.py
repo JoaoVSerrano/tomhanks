@@ -6,12 +6,11 @@ from pathlib import Path
 from typing import Any
 
 import requests
-from flask import Flask, jsonify, request, send_from_directory, session
+from flask import Flask, jsonify, request, send_from_directory
 from sqlalchemy import delete, select
-from werkzeug.security import check_password_hash, generate_password_hash
 
 from backend.database import session_scope, upgrade_database
-from backend.models import Comment, Favorite, User
+from backend.models import Comment, Favorite
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -29,6 +28,78 @@ app.config.update(
 )
 
 
+# ---------------------------------------------------------------------------
+# Auth-service proxy helpers
+# ---------------------------------------------------------------------------
+
+def auth_service_url() -> str:
+    return os.getenv('AUTH_SERVICE_URL', 'http://auth-service:3000')
+
+
+def internal_token() -> str:
+    return os.getenv('INTERNAL_TOKEN', '')
+
+
+def _forward_to_auth(method: str, path: str, **kwargs) -> requests.Response:
+    """Encaminha uma requisição ao microsserviço de autenticação."""
+    url = f'{auth_service_url()}{path}'
+    # Repassa o cookie de sessão para que o auth-service reconheça o usuário
+    cookies = request.cookies
+    headers = kwargs.pop('headers', {})
+    headers['X-Internal-Token'] = internal_token()
+    return requests.request(method, url, cookies=cookies, headers=headers, timeout=30, **kwargs)
+
+
+def _auth_response_payload(resp: requests.Response) -> dict[str, Any]:
+    try:
+        payload = resp.json()
+    except ValueError:
+        app.logger.error(
+            'Auth-service retornou resposta não JSON em %s %s: status=%s body=%r',
+            resp.request.method if resp.request else 'UNKNOWN',
+            resp.url,
+            resp.status_code,
+            resp.text[:500],
+        )
+        payload = {'error': 'Serviço de autenticação retornou uma resposta inválida.'}
+
+    if isinstance(payload, dict):
+        return payload
+    return {'data': payload}
+
+
+def _set_cookie_headers(resp: requests.Response) -> list[str]:
+    headers = resp.raw.headers
+    if hasattr(headers, 'getlist'):
+        return headers.getlist('Set-Cookie')
+    if hasattr(headers, 'get_all'):
+        return headers.get_all('Set-Cookie')
+    header = resp.headers.get('Set-Cookie')
+    return [header] if header else []
+
+
+def _proxy_auth(method: str, path: str, **kwargs):
+    """Faz proxy de uma requisição de auth e retorna a resposta Flask completa."""
+    try:
+        resp = _forward_to_auth(method, path, **kwargs)
+    except requests.RequestException as exc:
+        app.logger.error('Auth-service indisponível: %s', exc)
+        return jsonify({'error': 'Serviço de autenticação indisponível.'}), 503
+
+    response = jsonify(_auth_response_payload(resp))
+    response.status_code = resp.status_code
+
+    # Mantém todos os atributos do cookie assinado pelo auth-service.
+    for header in _set_cookie_headers(resp):
+        response.headers.add('Set-Cookie', header)
+
+    return response
+
+
+# ---------------------------------------------------------------------------
+# CORS
+# ---------------------------------------------------------------------------
+
 def _cors_origins() -> set[str]:
     raw = os.getenv('CORS_ORIGINS', 'http://localhost:4200').strip()
     return {item.strip() for item in raw.split(',') if item.strip()}
@@ -43,6 +114,8 @@ def add_cors_headers(response):
         response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
         response.headers['Access-Control-Allow-Methods'] = 'GET,POST,DELETE,OPTIONS'
         response.headers['Vary'] = 'Origin'
+    if response.content_type.startswith('text/html'):
+        response.headers['Cache-Control'] = 'no-store, max-age=0'
     return response
 
 
@@ -54,6 +127,10 @@ def api_preflight(_path: str):
 def json_error(message: str, status: int = 400):
     return jsonify({'error': message}), status
 
+
+# ---------------------------------------------------------------------------
+# TMDB helpers
+# ---------------------------------------------------------------------------
 
 def normalize_poster_path(poster_path: str | None) -> str | None:
     if not poster_path:
@@ -149,16 +226,22 @@ def get_tom_hanks_catalog() -> list[dict[str, Any]]:
     return catalog
 
 
-def current_user_id() -> int | None:
-    user_id = session.get('user_id')
-    return int(user_id) if user_id is not None else None
-
+# ---------------------------------------------------------------------------
+# Sessão local (o user_id fica na cookie do catálogo após login no auth-service)
+# ---------------------------------------------------------------------------
 
 def require_login():
-    user_id = current_user_id()
-    if user_id is None:
-        return None, json_error('Faça login para continuar.', 401)
-    return user_id, None
+    """Verifica se o usuário está autenticado consultando o auth-service."""
+    try:
+        resp = _forward_to_auth('GET', '/me')
+        if resp.status_code != 200:
+            return None, json_error('Faça login para continuar.', 401)
+        data = resp.json()
+        user_id = int(data['user']['id'])
+        return user_id, None
+    except requests.RequestException as exc:
+        app.logger.error('Auth-service indisponível em require_login: %s', exc)
+        return None, json_error('Serviço de autenticação indisponível.', 503)
 
 
 def serialize_movie(movie: dict[str, Any], favorite_ids: set[int], comments: list[dict[str, Any]]):
@@ -197,104 +280,61 @@ def initialize_app():
     return None
 
 
+# ---------------------------------------------------------------------------
+# Health
+# ---------------------------------------------------------------------------
+
 @app.get('/api/health')
 def health():
     return jsonify({'ok': True})
 
 
+# ---------------------------------------------------------------------------
+# Auth — proxy para o microsserviço de autenticação
+# ---------------------------------------------------------------------------
+
 @app.get('/api/auth/me')
 def me():
-    user_id = current_user_id()
-    if user_id is None:
-        return json_error('Não autenticado.', 401)
-
-    with session_scope() as db:
-        user = db.get(User, user_id)
-        if not user:
-            session.clear()
-            return json_error('Sessão expirada.', 401)
-
-        return jsonify(
-            {
-                'user': {
-                    'id': int(user.id),
-                    'nome': user.nome,
-                    'email': user.email,
-                    'criado_em': user.criado_em.isoformat() if hasattr(user.criado_em, 'isoformat') else user.criado_em,
-                }
-            }
-        )
+    response = _proxy_auth('GET', '/me')
+    if response.status_code == 401:
+        return jsonify({'user': None})
+    return response
 
 
 @app.post('/api/auth/register')
 def register():
-    payload = request.get_json(silent=True) or {}
-    nome = str(payload.get('nome', '')).strip()
-    email = str(payload.get('email', '')).strip().lower()
-    senha = str(payload.get('senha', ''))
-
-    if len(nome) < 2:
-        return json_error('Informe um nome válido.')
-    if '@' not in email or len(email) < 5:
-        return json_error('Informe um e-mail válido.')
-    if len(senha) < 6:
-        return json_error('A senha precisa ter pelo menos 6 caracteres.')
-
-    senha_hash = generate_password_hash(senha)
-    with session_scope() as db:
-        existing = db.scalar(select(User).where(User.email == email))
-        if existing:
-            return json_error('Já existe uma conta com esse e-mail.', 409)
-
-        user = User(nome=nome, email=email, senha_hash=senha_hash)
-        db.add(user)
-        db.flush()
-        db.refresh(user)
-        session['user_id'] = int(user.id)
-        return jsonify(
-            {
-                'user': {
-                    'id': int(user.id),
-                    'nome': user.nome,
-                    'email': user.email,
-                    'criado_em': user.criado_em.isoformat() if hasattr(user.criado_em, 'isoformat') else user.criado_em,
-                }
-            }
-        ), 201
+    return _proxy_auth('POST', '/register', json=request.get_json(silent=True) or {})
 
 
 @app.post('/api/auth/login')
 def login():
-    payload = request.get_json(silent=True) or {}
-    email = str(payload.get('email', '')).strip().lower()
-    senha = str(payload.get('senha', ''))
-
-    if not email or not senha:
-        return json_error('Informe e-mail e senha.')
-
-    with session_scope() as db:
-        user = db.scalar(select(User).where(User.email == email))
-        if not user or not check_password_hash(user.senha_hash, senha):
-            return json_error('Credenciais inválidas.', 401)
-
-        session['user_id'] = int(user.id)
-        return jsonify(
-            {
-                'user': {
-                    'id': int(user.id),
-                    'nome': user.nome,
-                    'email': user.email,
-                    'criado_em': user.criado_em.isoformat() if hasattr(user.criado_em, 'isoformat') else user.criado_em,
-                }
-            }
-        )
+    return _proxy_auth('POST', '/login', json=request.get_json(silent=True) or {})
 
 
 @app.post('/api/auth/logout')
 def logout():
-    session.clear()
-    return jsonify({'ok': True})
+    return _proxy_auth('POST', '/logout')
 
+
+@app.post('/api/auth/forgot-password')
+def forgot_password():
+    return _proxy_auth('POST', '/forgot-password', json=request.get_json(silent=True) or {})
+
+
+@app.post('/api/auth/reset-password')
+def reset_password():
+    return _proxy_auth('POST', '/reset-password', json=request.get_json(silent=True) or {})
+
+
+@app.get('/api/auth/reset-password/check')
+def check_reset_token():
+    token = request.args.get('token', '')
+    return _proxy_auth('GET', f'/reset-password/check?token={token}')
+
+
+# ---------------------------------------------------------------------------
+# Catálogo
+# ---------------------------------------------------------------------------
 
 def load_user_state(db, user_id: int) -> tuple[set[int], list[dict[str, Any]]]:
     favorite_ids = set(
@@ -353,6 +393,10 @@ def catalog():
             payload['warning'] = catalog_warning
         return jsonify(payload)
 
+
+# ---------------------------------------------------------------------------
+# Favoritos
+# ---------------------------------------------------------------------------
 
 @app.get('/api/favorites')
 def favorites():
@@ -442,6 +486,10 @@ def delete_favorite(movie_id: int):
         return jsonify({'ok': True, 'deleted': result.rowcount > 0})
 
 
+# ---------------------------------------------------------------------------
+# Comentários
+# ---------------------------------------------------------------------------
+
 @app.get('/api/comments')
 def list_comments():
     user_id, error = require_login()
@@ -527,6 +575,10 @@ def delete_comment(comment_id: int):
         result = db.execute(delete(Comment).where(Comment.id == comment_id, Comment.usuario_id == user_id))
         return jsonify({'ok': True, 'deleted': result.rowcount > 0})
 
+
+# ---------------------------------------------------------------------------
+# Frontend estático
+# ---------------------------------------------------------------------------
 
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')

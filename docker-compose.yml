@@ -1,4 +1,45 @@
 services:
+  # ─────────────────────────────────────────────────────────────────────────
+  # Microsserviço de autenticação — NÃO publica porta para o host
+  # Acessível internamente pelo nome "auth-service" na rede Docker
+  # ─────────────────────────────────────────────────────────────────────────
+  auth-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.auth
+    container_name: tomhanks-auth
+    environment:
+      AUTH_SECRET_KEY: ${AUTH_SECRET_KEY:-auth-change-me}
+      AUTH_PORT: 3000
+      AUTH_ADMIN_NAME: ${AUTH_ADMIN_NAME:-Administrador}
+      AUTH_ADMIN_EMAIL: ${AUTH_ADMIN_EMAIL:-}
+      AUTH_ADMIN_PASSWORD: ${AUTH_ADMIN_PASSWORD:-}
+      # Banco de dados (compartilhado ou separado — usa as mesmas variáveis)
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT:-3306}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME}
+      # E-mail (Mailtrap para desenvolvimento)
+      SMTP_HOST: ${SMTP_HOST:-sandbox.smtp.mailtrap.io}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_ENCRYPTION: ${SMTP_ENCRYPTION:-starttls}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-noreply@tomhanks.local}
+      PASSWORD_RESET_EXPOSE_LINK: ${PASSWORD_RESET_EXPOSE_LINK:-0}
+      # URL do frontend para montar o link de reset
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:8080}
+      # Token interno para chamadas catálogo → auth-service
+      INTERNAL_TOKEN: ${INTERNAL_TOKEN:-internal-change-me}
+    # Sem "ports:" — serviço invisível para o host, apenas na rede interna
+    networks:
+      - tomhanks-net
+    restart: unless-stopped
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Catálogo de filmes — único ponto de entrada público
+  # ─────────────────────────────────────────────────────────────────────────
   app:
     build:
       context: .
@@ -17,6 +58,17 @@ services:
       SESSION_COOKIE_SAMESITE: ${SESSION_COOKIE_SAMESITE:-Lax}
       SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-0}
       PORT: ${PORT:-8080}
+      # URL interna do auth-service (pelo nome do serviço Docker)
+      AUTH_SERVICE_URL: http://auth-service:3000
+      INTERNAL_TOKEN: ${INTERNAL_TOKEN:-internal-change-me}
     ports:
       - "${PORT:-8080}:${PORT:-8080}"
+    depends_on:
+      - auth-service
+    networks:
+      - tomhanks-net
     restart: unless-stopped
+
+networks:
+  tomhanks-net:
+    driver: bridge

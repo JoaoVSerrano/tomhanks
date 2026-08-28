@@ -5,8 +5,8 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
-from backend.database import Base, build_database_url
-from backend import models  # noqa: F401 - register ORM models
+from auth_service.database import Base, build_database_url
+from auth_service import models  # noqa: F401 - register ORM models
 
 config = context.config
 
@@ -26,12 +26,11 @@ def run_migrations_offline() -> None:
         dialect_opts={'paramstyle': 'named'},
         compare_type=True,
         compare_server_default=True,
-        version_table='alembic_version_backend',
+        version_table='alembic_version_auth',
     )
 
     with context.begin_transaction():
         context.run_migrations()
-
 
 
 def run_migrations_online() -> None:
@@ -47,7 +46,7 @@ def run_migrations_online() -> None:
             target_metadata=target_metadata,
             compare_type=True,
             compare_server_default=True,
-            version_table='alembic_version_backend',
+            version_table='alembic_version_auth',
         )
 
         with context.begin_transaction():
