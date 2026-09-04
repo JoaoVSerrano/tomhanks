@@ -7,7 +7,6 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.auth
-    container_name: tomhanks-auth
     environment:
       AUTH_SECRET_KEY: ${AUTH_SECRET_KEY:-auth-change-me}
       AUTH_PORT: 3000
@@ -44,7 +43,6 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: tomhanks-app
     environment:
       FLASK_SECRET_KEY: ${FLASK_SECRET_KEY:-change-me}
       TMDB_API_KEY: ${TMDB_API_KEY:-}
