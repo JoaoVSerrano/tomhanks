@@ -5,6 +5,52 @@
 
 ---
 
+## Atividade 4 — Controle de Acesso por Papel (RBAC)
+
+### Permissões por papel
+
+| Ação | `usuario` | `admin` |
+|---|:---:|:---:|
+| Cadastrar-se | ✅ | ✅ |
+| Fazer login / logout | ✅ | ✅ |
+| Solicitar redefinição de senha | ✅ | ✅ |
+| Ver o catálogo de filmes | ✅ | ✅ |
+| Favoritar / desfavoritar filmes | ✅ | ✅ |
+| Criar comentários | ✅ | ✅ |
+| Apagar **próprios** comentários | ✅ | ✅ |
+| **Apagar comentários de qualquer usuário (moderação)** | ❌ | ✅ |
+| **Listar todos os usuários** | ❌ | ✅ |
+| **Promover / rebaixar role de um usuário** | ❌ | ✅ |
+
+### Ação exclusiva de admin implementada
+
+**Moderação de comentários** — um `admin` pode apagar o comentário de qualquer usuário chamando `DELETE /api/comments/<id>`. Um `usuario` comum tentando apagar um comentário que não é seu recebe **HTTP 403**.
+
+O enforcement ocorre no servidor, em duas camadas:
+1. **`backend/app.py`** — `require_role('admin')` consulta `/me` no auth-service e verifica o campo `role`.
+2. **`auth_service/app.py`** — os endpoints `/admin/*` têm `require_admin()` que rejeita com 403 qualquer sessão sem `role == 'admin'`.
+
+Esconder botões no frontend **não é** segurança; chamar o endpoint direto pelo Postman/curl com um token de `usuario` retorna 403.
+
+### Novos endpoints admin
+
+| Método | Rota (catálogo) | Rota (auth-service) | Descrição |
+|---|---|---|---|
+| `GET` | `/api/admin/users` | `/admin/users` | Lista todos os usuários |
+| `POST` | `/api/admin/users/<id>/role` | `/admin/users/<id>/role` | Altera role (`usuario` ↔ `admin`) |
+| `DELETE` | `/api/comments/<id>` | — | Admin apaga qualquer comentário; usuário só o próprio |
+
+### Resposta: Padrão A ou Padrão B?
+
+O `auth-service` usa **Padrão A — enforcement centralizado**.
+
+A cada ação que exige verificação de permissão (`/api/admin/users`, `DELETE /api/comments/<id>`, etc.), o catálogo faz uma chamada de rede ao auth-service (`GET /me`) para obter o usuário atual e o seu `role`. A decisão "pode ou não pode" é tomada no servidor — auth-service para rotas `/admin/*` e catálogo para as rotas de comentários.
+
+**O que mudaria no Padrão B (claims no token JWT)?**
+O `role` seria embutido no JWT assinado no momento do login. Cada serviço decidiria sozinho, sem chamada extra, apenas decodificando o token. O catálogo não precisaria chamar `/me` — bastaria validar a assinatura do JWT localmente. A desvantagem: se um `usuario` for promovido a `admin`, ele só enxerga a mudança quando o token expirar e fizer login novamente. No Padrão A, o efeito é imediato porque cada request busca o `role` em tempo real no banco via auth-service.
+
+---
+
 ## Atividade 3 — Microsserviço de Login
 
 ### O que mudou em relação à Atividade 2

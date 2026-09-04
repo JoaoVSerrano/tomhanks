@@ -244,6 +244,30 @@ def require_login():
         return None, json_error('Serviço de autenticação indisponível.', 503)
 
 
+def require_role(expected_role: str):
+    """Verifica autenticação e role do usuário consultando o auth-service.
+
+    Retorna (user_data, None) em caso de sucesso, ou (None, resposta_erro)
+    se não autenticado (401) ou sem o papel exigido (403).
+    O enforcement real da permissão acontece aqui, no servidor — nunca no cliente.
+    """
+    try:
+        resp = _forward_to_auth('GET', '/me')
+        if resp.status_code != 200:
+            return None, json_error('Faça login para continuar.', 401)
+        data = resp.json()
+        user = data.get('user', {})
+        role = user.get('role', 'usuario')
+        if role != expected_role:
+            return None, json_error(
+                'Acesso negado. Apenas administradores podem executar esta ação.', 403
+            )
+        return user, None
+    except requests.RequestException as exc:
+        app.logger.error('Auth-service indisponível em require_role: %s', exc)
+        return None, json_error('Serviço de autenticação indisponível.', 503)
+
+
 def serialize_movie(movie: dict[str, Any], favorite_ids: set[int], comments: list[dict[str, Any]]):
     movie_id = int(movie['tmdb_movie_id'])
     movie_comments = [item for item in comments if item['tmdb_movie_id'] == movie_id]
@@ -330,6 +354,22 @@ def reset_password():
 def check_reset_token():
     token = request.args.get('token', '')
     return _proxy_auth('GET', f'/reset-password/check?token={token}')
+
+
+# ---------------------------------------------------------------------------
+# Admin — proxy das rotas administrativas do auth-service
+# ---------------------------------------------------------------------------
+
+@app.get('/api/admin/users')
+def admin_list_users():
+    """Lista todos os usuários. Exclusivo de admin (enforced no auth-service)."""
+    return _proxy_auth('GET', '/admin/users')
+
+
+@app.post('/api/admin/users/<int:target_id>/role')
+def admin_change_role(target_id: int):
+    """Promove ou rebaixa o papel de um usuário. Exclusivo de admin (enforced no auth-service)."""
+    return _proxy_auth('POST', f'/admin/users/{target_id}/role', json=request.get_json(silent=True) or {})
 
 
 # ---------------------------------------------------------------------------
@@ -571,9 +611,26 @@ def delete_comment(comment_id: int):
     if error:
         return error
 
+    # Verifica se o usuário é admin (enforcement no servidor, não no cliente)
+    admin_user, _ = require_role('admin')
+    is_admin = admin_user is not None
+
     with session_scope() as db:
-        result = db.execute(delete(Comment).where(Comment.id == comment_id, Comment.usuario_id == user_id))
-        return jsonify({'ok': True, 'deleted': result.rowcount > 0})
+        if is_admin:
+            # Admin pode apagar comentários de qualquer usuário (moderação)
+            result = db.execute(delete(Comment).where(Comment.id == comment_id))
+        else:
+            # Usuário comum só pode apagar os próprios comentários
+            result = db.execute(delete(Comment).where(Comment.id == comment_id, Comment.usuario_id == user_id))
+
+        deleted = result.rowcount > 0
+        if not deleted and not is_admin:
+            # Se não deletou nada e não é admin, pode ser que o comentário pertence a outro usuário
+            comment_exists = db.scalar(select(Comment).where(Comment.id == comment_id))
+            if comment_exists:
+                return json_error('Sem permissão para apagar este comentário.', 403)
+
+        return jsonify({'ok': True, 'deleted': deleted})
 
 
 # ---------------------------------------------------------------------------

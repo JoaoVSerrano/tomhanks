@@ -328,6 +328,98 @@ def get_user_internal(user_id: int):
 
 
 # ---------------------------------------------------------------------------
+# Helper de autorização — verifica role admin via sessão
+# ---------------------------------------------------------------------------
+
+def require_admin():
+    """Verifica se o usuário autenticado tem role 'admin'.
+
+    Retorna (user, None) em caso de sucesso ou (None, resposta_erro) se não
+    autenticado (401) ou sem permissão (403).
+    """
+    user_id = session.get('user_id')
+    if user_id is None:
+        return None, json_error('Não autenticado.', 401)
+
+    with session_scope() as db:
+        user = db.get(User, int(user_id))
+        if not user:
+            session.clear()
+            return None, json_error('Sessão expirada.', 401)
+        if user.role != 'admin':
+            return None, json_error(
+                'Acesso negado. Apenas administradores podem executar esta ação.', 403
+            )
+        return user, None
+
+
+# ---------------------------------------------------------------------------
+# Admin — listar todos os usuários
+# ---------------------------------------------------------------------------
+
+@app.get('/admin/users')
+def admin_list_users():
+    _, err = require_admin()
+    if err:
+        return err
+
+    with session_scope() as db:
+        users = db.scalars(select(User).order_by(User.id)).all()
+        return jsonify({
+            'users': [
+                {
+                    'id': int(u.id),
+                    'nome': u.nome,
+                    'email': u.email,
+                    'role': u.role,
+                    'criado_em': u.criado_em.isoformat() if hasattr(u.criado_em, 'isoformat') else u.criado_em,
+                }
+                for u in users
+            ]
+        })
+
+
+# ---------------------------------------------------------------------------
+# Admin — promover / rebaixar role de um usuário
+# ---------------------------------------------------------------------------
+
+@app.post('/admin/users/<int:target_id>/role')
+def admin_change_role(target_id: int):
+    admin_user, err = require_admin()
+    if err:
+        return err
+
+    payload = request.get_json(silent=True) or {}
+    new_role = str(payload.get('role', '')).strip().lower()
+
+    if new_role not in ('usuario', 'admin'):
+        return json_error("Role inválida. Use 'usuario' ou 'admin'.")
+
+    with session_scope() as db:
+        target = db.get(User, target_id)
+        if not target:
+            return json_error('Usuário não encontrado.', 404)
+
+        old_role = target.role
+        target.role = new_role
+
+        app.logger.info(
+            'Admin %s (id=%s) alterou role de usuário %s de %s para %s',
+            admin_user.email, admin_user.id, target.email, old_role, new_role,
+        )
+
+        return jsonify({
+            'ok': True,
+            'user': {
+                'id': int(target.id),
+                'nome': target.nome,
+                'email': target.email,
+                'role': target.role,
+            },
+        })
+
+
+# ---------------------------------------------------------------------------
 # Esqueci minha senha — solicitar link
 # ---------------------------------------------------------------------------
 
