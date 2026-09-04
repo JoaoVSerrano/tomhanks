@@ -72,6 +72,3 @@ services:
 networks:
   tomhanks-net:
     driver: bridge
-    ipam:
-      config:
-        - subnet: 10.89.0.0/24
