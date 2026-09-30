@@ -220,13 +220,42 @@ def ensure_configured_admin() -> None:
         )
 
 
+from prometheus_flask_exporter import PrometheusMetrics
+
+metrics = PrometheusMetrics(app)
+
+
 # ---------------------------------------------------------------------------
-# Rotas de saúde
+# Rotas de saúde & Readiness
 # ---------------------------------------------------------------------------
 
 @app.get('/health')
 def health():
-    return jsonify({'ok': True, 'service': 'auth'})
+    database_ok = False
+    minio_ok = False
+    try:
+        with session_scope() as db:
+            db.execute(select(1))
+        database_ok = True
+    except Exception as exc:
+        app.logger.error('Banco de dados (MariaDB) indisponível em healthcheck: %s', exc)
+
+    try:
+        client = get_minio_client()
+        if client is not None:
+            client.list_buckets()
+            minio_ok = True
+    except Exception as exc:
+        app.logger.error('MinIO indisponível em healthcheck: %s', exc)
+
+    healthy = database_ok and minio_ok
+    payload = {
+        'status': 'healthy' if healthy else 'unhealthy',
+        'service': 'auth-service',
+        'database': 'connected' if database_ok else 'disconnected',
+        'minio': 'connected' if minio_ok else 'disconnected',
+    }
+    return jsonify(payload), 200 if healthy else 503
 
 
 # ---------------------------------------------------------------------------

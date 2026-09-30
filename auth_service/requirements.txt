@@ -6,3 +6,4 @@ mysql-connector-python==9.0.0
 Werkzeug==3.0.4
 requests==2.32.3
 minio==7.2.7
+prometheus-flask-exporter==0.23.0

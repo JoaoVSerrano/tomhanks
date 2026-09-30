@@ -6,3 +6,4 @@ mysql-connector-python==9.0.0
 requests==2.32.3
 minio==7.2.7
 PyYAML==6.0.2
+prometheus-flask-exporter==0.23.0

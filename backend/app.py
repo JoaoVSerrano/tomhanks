@@ -40,6 +40,26 @@ def log_service_url() -> str:
     return os.getenv('LOG_SERVICE_URL', 'http://log-service:4000')
 
 
+def minio_is_ready() -> bool:
+    """Confere conectividade com o object storage usado pelos avatares."""
+    try:
+        from minio import Minio
+
+        raw_endpoint = os.getenv('MINIO_ENDPOINT', 'minio:9000')
+        endpoint = raw_endpoint.split('://')[-1] if '://' in raw_endpoint else raw_endpoint
+        client = Minio(
+            endpoint,
+            access_key=os.getenv('MINIO_ACCESS_KEY', 'minioadmin'),
+            secret_key=os.getenv('MINIO_SECRET_KEY', 'minioadmin'),
+            secure=False,
+        )
+        client.list_buckets()
+        return True
+    except Exception as exc:
+        app.logger.warning('MinIO indisponível em healthcheck: %s', exc)
+        return False
+
+
 def internal_token() -> str:
     return os.getenv('INTERNAL_TOKEN', '')
 
@@ -343,13 +363,53 @@ def initialize_app():
     return None
 
 
+from prometheus_flask_exporter import PrometheusMetrics
+
+metrics = PrometheusMetrics(app)
+
+
 # ---------------------------------------------------------------------------
-# Health
+# Health & Readiness
 # ---------------------------------------------------------------------------
 
+@app.get('/health')
 @app.get('/api/health')
 def health():
-    return jsonify({'ok': True})
+    db_ok = False
+    auth_ok = False
+    log_ok = False
+    minio_ok = minio_is_ready()
+
+    try:
+        with session_scope() as db:
+            db.execute(select(1))
+        db_ok = True
+    except Exception:
+        db_ok = False
+
+    try:
+        resp = requests.get(f"{auth_service_url()}/health", timeout=2)
+        auth_ok = resp.status_code == 200
+    except Exception:
+        auth_ok = False
+
+    try:
+        resp = requests.get(f"{log_service_url()}/health", timeout=2)
+        log_ok = resp.status_code == 200
+    except Exception:
+        log_ok = False
+
+    status_code = 200 if (db_ok and auth_ok and log_ok and minio_ok) else 503
+    return jsonify({
+        'status': 'healthy' if status_code == 200 else 'unhealthy',
+        'service': 'app-gateway',
+        'dependencies': {
+            'database': 'connected' if db_ok else 'disconnected',
+            'auth_service': 'reachable' if auth_ok else 'unreachable',
+            'log_service': 'reachable' if log_ok else 'unreachable',
+            'minio': 'connected' if minio_ok else 'disconnected',
+        }
+    }), status_code
 
 
 # ---------------------------------------------------------------------------

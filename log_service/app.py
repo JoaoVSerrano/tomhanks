@@ -33,8 +33,13 @@ def require_internal_token():
     return None
 
 
+from prometheus_flask_exporter import PrometheusMetrics
+
+metrics = PrometheusMetrics(app)
+
+
 # ---------------------------------------------------------------------------
-# Health
+# Health & Readiness
 # ---------------------------------------------------------------------------
 
 @app.get('/health')
@@ -42,10 +47,10 @@ def health():
     try:
         r = get_redis()
         r.ping()
-        redis_ok = True
-    except Exception:
-        redis_ok = False
-    return jsonify({'ok': True, 'service': 'log-service', 'redis': redis_ok})
+        return jsonify({'status': 'healthy', 'service': 'log-service', 'redis': 'connected'}), 200
+    except Exception as exc:
+        app.logger.error('Redis indisponível em healthcheck: %s', exc)
+        return jsonify({'status': 'unhealthy', 'service': 'log-service', 'redis': 'disconnected', 'error': str(exc)}), 503
 
 
 # ---------------------------------------------------------------------------

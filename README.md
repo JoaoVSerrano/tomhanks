@@ -5,6 +5,88 @@
 
 ---
 
+## Atividade Extra — Observabilidade (Health Checks, Métricas, Prometheus e Grafana)
+
+> Atividade Extra (ISW055) · Professor: [@siriani](https://github.com/siriani)
+
+### Visão Geral
+
+Foi implementado um ecossistema completo de **Observabilidade** cobrindo os pilares de **Logs, Métricas e Health Checks (Readiness Real)** em todos os microsserviços.
+
+---
+
+### Liveness vs Readiness (Readiness Real de Verdade)
+
+Um endpoint `/health` que responde estaticamente `HTTP 200 OK` é perigoso porque não reflete a capacidade real do serviço de atender requisições.
+
+Nesta solução, cada microsserviço testa ativamente suas dependências de infraestrutura antes de responder:
+- **Catálogo Gateway (`app`)**: Testa conectividade com MariaDB, MinIO, `auth-service` e `log-service`. Retorna `200 OK` se saudável ou `503 Service Unavailable` se alguma dependência cair.
+- **`auth-service`**: Executa query de controle (`SELECT 1`) no MariaDB e consulta o MinIO. Retorna `503` em caso de desconexão.
+- **`log-service`**: Executa `redis.ping()` no Redis Streams. Se o Redis for derrubado, responde **HTTP 503 Service Unavailable**:
+  ```json
+  {
+    "status": "unhealthy",
+    "service": "log-service",
+    "redis": "disconnected",
+    "error": "Error -3 connecting to redis:6379"
+  }
+  ```
+
+---
+
+### Integração com Docker HEALTHCHECK
+
+Cada container no `docker-compose.yml` possui instrução `healthcheck:` configurada consultando o endpoint `/health` local a cada 5 segundos:
+
+- Se o `redis` cair, o `log-service` falha seu teste interno e responde `503`.
+- O motor do Docker identifica as 3 falhas consecutivas e marca automaticamente o container como **`unhealthy`** no `docker compose ps`.
+
+---
+
+### Métricas Prometheus (`/metrics`)
+
+Todos os serviços Flask foram instrumentados com o exportador de métricas Prometheus (`prometheus-flask-exporter`), expondo métricas nativas no formato texto padrão na rota `/metrics`:
+- Contagem total de requisições por rota e código HTTP (`flask_http_request_total`)
+- Histograma de latência de resposta (`flask_http_request_duration_seconds`)
+- Métricas do runtime Python (memória, GC, CPU, descritores de arquivo abertos)
+
+---
+
+### Stack de Monitoramento: Prometheus + Grafana
+
+| Serviço | Porta do Host | Descrição |
+|---|---|---|
+| **Prometheus** | `http://localhost:9091` | Coleta métricas raspando `app:8080/metrics`, `auth-service:3000/metrics` e `log-service:4000/metrics` a cada 5s |
+| **Grafana** | `http://localhost:3001` | Dashboard gráfico para visualização de vazão, latência e erros |
+
+O dashboard **Tom Hanks - Observabilidade** é provisionado automaticamente no Grafana, com painéis de requisições por minuto, taxa de erros 4xx/5xx e latência p95. O datasource aponta para `http://prometheus:9090` dentro da rede Docker.
+
+---
+
+### Como Testar a Observabilidade e Prova de Falha Real
+
+Para executar o script que valida os healthchecks, testa as métricas e simula a queda do Redis (comprovando o status `503` e a mudança automática para `unhealthy`):
+
+```bash
+bash demo_observability.sh
+```
+
+### Evidência da execução
+
+A execução integrada do script confirmou:
+
+```text
+GET /api/health                         -> 200 healthy
+GET /metrics                            -> flask_http_request_total e flask_http_request_duration_seconds
+Redis parado; GET /health do log-service -> HTTP 503, status unhealthy
+docker compose ps                       -> log-service (unhealthy)
+Redis relançado                         -> log-service (healthy)
+```
+
+O mesmo fluxo pode ser reproduzido a qualquer momento com `bash demo_observability.sh`; o script falha se não observar o `503`, o estado `unhealthy` ou a recuperação para `healthy`.
+
+---
+
 ## Atividade Extra — CI/CD com GitHub Actions
 
 > Atividade Extra (ISW055) · Professor: [@siriani](https://github.com/siriani)
