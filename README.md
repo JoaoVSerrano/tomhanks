@@ -5,6 +5,75 @@
 
 ---
 
+## Atividade Extra — CI/CD com GitHub Actions
+
+> Atividade Extra (ISW055) · Professor: [@siriani](https://github.com/siriani)
+
+### Visão Geral
+
+Foi implementado um pipeline automatizado de **CI/CD (Continuous Integration / Continuous Deployment)** utilizando **GitHub Actions** em `.github/workflows/ci-cd.yml`.
+
+O pipeline garante reprodutibilidade, testes automatizados a cada alteração de código e empacotamento/publicação automática das imagens Docker no **GitHub Container Registry (GHCR)** com tags rastreáveis atreladas ao SHA do commit.
+
+- **Link para as execuções do GitHub Actions**: [https://github.com/JoaoVSerrano/tomhanks/actions](https://github.com/JoaoVSerrano/tomhanks/actions)
+
+---
+
+### Estágios do Pipeline
+
+```
+git push origin main
+       │
+       ▼
+ ┌─────────────────────────────────────────────────────────┐
+ │ 🧪 Estágio 1: CI (Continuous Integration)              │
+ │ - Configuração do ambiente Python 3.12                  │
+ │ - Instalação de dependências                            │
+ │ - Execução de testes automatizados (pytest tests/ -v)   │
+ │ ⚠ Se algum teste falhar, o pipeline é interrompido    │
+ └─────────────────────────────────────────────────────────┘
+       │ (apenas se os testes passarem)
+       ▼
+ ┌─────────────────────────────────────────────────────────┐
+ │ 📦 Estágio 2: CD (Continuous Delivery/Deployment)       │
+ │ - Login seguro no GitHub Container Registry (GHCR)      │
+ │ - Build das imagens via Docker Buildx                   │
+ │ - Publicação das imagens com tags rastreáveis (SHA/tag) │
+ └─────────────────────────────────────────────────────────┘
+```
+
+---
+
+### Imagens Publicadas no GHCR com Tags Rastreáveis
+
+A cada push aprovado na branch `main`, imagens contendo o commit SHA específico e a tag `latest` são publicadas automaticamente:
+
+| Serviço | Imagem GHCR | Tag do Commit SHA | Tag Estável |
+|---|---|---|---|
+| **Catálogo Gateway** | `ghcr.io/joaovserrano/tomhanks-app` | `sha-<short_sha>` | `latest` |
+| **Auth Service** | `ghcr.io/joaovserrano/tomhanks-auth-service` | `sha-<short_sha>` | `latest` |
+| **Log Service** | `ghcr.io/joaovserrano/tomhanks-log-service` | `sha-<short_sha>` | `latest` |
+
+---
+
+### Gestão de Segredos fora do Repositório (Security Best Practices)
+
+- Nenhuma chave ou credencial (senhas de banco, segredos JWT, tokens de e-mail ou API keys) é versionada no repositório YAML ou Dockerfile.
+- O pipeline utiliza o token nativo seguro do GitHub (`${{ secrets.GITHUB_TOKEN }}`) para autenticação no GHCR.
+- As variáveis de ambiente da aplicação são fornecidas exclusivamente via **GitHub Secrets** (para o pipeline) e via painel de ambiente do **Portainer** na nuvem.
+
+---
+
+### Como Testar o Pipeline Localmente
+
+Para executar a validação dos testes automatizados e conferir a configuração do workflow:
+
+```bash
+bash demo_cicd.sh
+```
+
+---
+
 ## Atividade Extra — Documentação Swagger/OpenAPI
 
 > Atividade Extra (ISW055) · Professor: [@siriani](https://github.com/siriani)

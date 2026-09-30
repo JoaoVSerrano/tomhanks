@@ -1,0 +1,119 @@
+name: CI/CD Pipeline — Catálogo Tom Hanks
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  test:
+    name: 🧪 CI — Execução de Testes Automatizados
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout do repositório
+        uses: actions/checkout@v4
+
+      - name: 🐍 Configurar Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: 📦 Instalar dependências Python
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: 🧪 Executar suíte de testes pytest
+        run: |
+          pytest tests/ -v
+
+  build-and-push:
+    name: 📦 CD — Build & Publish no GitHub Container Registry (GHCR)
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout do repositório
+        uses: actions/checkout@v4
+
+      - name: 🐳 Configurar Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 🔑 Autenticar no GitHub Container Registry (GHCR)
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # -----------------------------------------------------------------------
+      # 1. Build & Push: App Principal (Tom Hanks Catalog Gateway)
+      # -----------------------------------------------------------------------
+      - name: 🏷️ Extrair tags e rótulos para tomhanks-app
+        id: meta-app
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/tomhanks-app
+          tags: |
+            type=raw,value=latest
+            type=sha,format=short,prefix=sha-
+
+      - name: 🚀 Build & Push tomhanks-app
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ steps.meta-app.outputs.tags }}
+          labels: ${{ steps.meta-app.outputs.labels }}
+
+      # -----------------------------------------------------------------------
+      # 2. Build & Push: Auth Service
+      # -----------------------------------------------------------------------
+      - name: 🏷️ Extrair tags e rótulos para tomhanks-auth-service
+        id: meta-auth
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/tomhanks-auth-service
+          tags: |
+            type=raw,value=latest
+            type=sha,format=short,prefix=sha-
+
+      - name: 🚀 Build & Push tomhanks-auth-service
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.auth
+          push: true
+          tags: ${{ steps.meta-auth.outputs.tags }}
+          labels: ${{ steps.meta-auth.outputs.labels }}
+
+      # -----------------------------------------------------------------------
+      # 3. Build & Push: Log Service (Auditoria / Redis Streams)
+      # -----------------------------------------------------------------------
+      - name: 🏷️ Extrair tags e rótulos para tomhanks-log-service
+        id: meta-log
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/tomhanks-log-service
+          tags: |
+            type=raw,value=latest
+            type=sha,format=short,prefix=sha-
+
+      - name: 🚀 Build & Push tomhanks-log-service
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.log
+          push: true
+          tags: ${{ steps.meta-log.outputs.tags }}
+          labels: ${{ steps.meta-log.outputs.labels }}
