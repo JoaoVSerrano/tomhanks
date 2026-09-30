@@ -35,6 +35,24 @@ services:
     restart: unless-stopped
 
   # ─────────────────────────────────────────────────────────────────────────
+  # MinIO — Object Storage para fotos de perfil (Atividade 6)
+  # ─────────────────────────────────────────────────────────────────────────
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    volumes:
+      - minio-data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    networks:
+      - tomhanks-net
+    restart: unless-stopped
+
+  # ─────────────────────────────────────────────────────────────────────────
   # Microsserviço de autenticação — NÃO publica porta para o host
   # Acessível internamente pelo nome "auth-service" na rede Docker
   # ─────────────────────────────────────────────────────────────────────────
@@ -54,6 +72,12 @@ services:
       DB_USER: ${DB_USER}
       DB_PASSWORD: ${DB_PASSWORD}
       DB_NAME: ${DB_NAME}
+      # MinIO Object Storage
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-minio:9000}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+      MINIO_BUCKET_NAME: ${MINIO_BUCKET_NAME:-tomhanks-avatars}
+      MINIO_PUBLIC_URL: ${MINIO_PUBLIC_URL:-http://localhost:9000/tomhanks-avatars}
       # E-mail (Mailtrap para desenvolvimento)
       SMTP_HOST: ${SMTP_HOST:-sandbox.smtp.mailtrap.io}
       SMTP_PORT: ${SMTP_PORT:-587}
@@ -71,6 +95,7 @@ services:
     # Sem "ports:" — serviço invisível para o host, apenas na rede interna
     depends_on:
       - log-service
+      - minio
     networks:
       - tomhanks-net
     restart: unless-stopped
@@ -95,6 +120,12 @@ services:
       SESSION_COOKIE_SAMESITE: ${SESSION_COOKIE_SAMESITE:-Lax}
       SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-0}
       PORT: ${PORT:-8080}
+      # MinIO Object Storage
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-minio:9000}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+      MINIO_BUCKET_NAME: ${MINIO_BUCKET_NAME:-tomhanks-avatars}
+      MINIO_PUBLIC_URL: ${MINIO_PUBLIC_URL:-http://localhost:9000/tomhanks-avatars}
       # URL interna do auth-service (pelo nome do serviço Docker)
       AUTH_SERVICE_URL: http://auth-service:3000
       INTERNAL_TOKEN: ${INTERNAL_TOKEN:-internal-change-me}
@@ -105,6 +136,7 @@ services:
     depends_on:
       - auth-service
       - log-service
+      - minio
     networks:
       - tomhanks-net
     restart: unless-stopped
@@ -119,3 +151,4 @@ networks:
 
 volumes:
   redis-data:
+  minio-data:

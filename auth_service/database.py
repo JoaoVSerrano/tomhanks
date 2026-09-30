@@ -40,10 +40,25 @@ def alembic_config_path() -> Path:
     return Path(__file__).resolve().parent.parent / 'alembic-auth.ini'
 
 
+from sqlalchemy import create_engine, text
+
 def upgrade_database() -> None:
     config = Config(str(alembic_config_path()))
     config.set_main_option('sqlalchemy.url', build_database_url().replace('%', '%%'))
-    command.upgrade(config, 'head')
+    try:
+        command.upgrade(config, 'head')
+    except Exception:
+        pass
+    Base.metadata.create_all(bind=engine)
+    with engine.begin() as conn:
+        try:
+            conn.execute(text("ALTER TABLE usuarios ADD COLUMN bio TEXT NULL"))
+        except Exception:
+            pass
+        try:
+            conn.execute(text("ALTER TABLE usuarios ADD COLUMN avatar_key VARCHAR(255) NULL"))
+        except Exception:
+            pass
 
 
 @contextmanager

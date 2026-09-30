@@ -258,15 +258,7 @@ def register():
         db.flush()
         db.refresh(user)
         session['user_id'] = int(user.id)
-        return jsonify({
-            'user': {
-                'id': int(user.id),
-                'nome': user.nome,
-                'email': user.email,
-                'role': user.role,
-                'criado_em': user.criado_em.isoformat() if hasattr(user.criado_em, 'isoformat') else user.criado_em,
-            }
-        }), 201
+        return jsonify({'user': serialize_user_dict(user)}), 201
 
 
 # ---------------------------------------------------------------------------
@@ -290,15 +282,7 @@ def login():
 
         session['user_id'] = int(user.id)
         log_event('login', usuario_id=int(user.id), detalhe=f'email={email}')
-        return jsonify({
-            'user': {
-                'id': int(user.id),
-                'nome': user.nome,
-                'email': user.email,
-                'role': user.role,
-                'criado_em': user.criado_em.isoformat() if hasattr(user.criado_em, 'isoformat') else user.criado_em,
-            }
-        })
+        return jsonify({'user': serialize_user_dict(user)})
 
 
 # ---------------------------------------------------------------------------
@@ -329,15 +313,7 @@ def me():
             session.clear()
             return json_error('Sessão expirada.', 401)
 
-        return jsonify({
-            'user': {
-                'id': int(user.id),
-                'nome': user.nome,
-                'email': user.email,
-                'role': user.role,
-                'criado_em': user.criado_em.isoformat() if hasattr(user.criado_em, 'isoformat') else user.criado_em,
-            }
-        })
+        return jsonify({'user': serialize_user_dict(user)})
 
 
 # ---------------------------------------------------------------------------
@@ -355,14 +331,188 @@ def get_user_internal(user_id: int):
         if not user:
             return json_error('Usuário não encontrado.', 404)
 
-        return jsonify({
-            'user': {
-                'id': int(user.id),
-                'nome': user.nome,
-                'email': user.email,
-                'role': user.role,
+        return jsonify({'user': serialize_user_dict(user)})
+
+
+# ---------------------------------------------------------------------------
+# Helpers para Perfil e Object Storage (MinIO)
+# ---------------------------------------------------------------------------
+
+def get_minio_client():
+    from minio import Minio
+    raw_endpoint = os.getenv('MINIO_ENDPOINT', 'minio:9000')
+    access_key = os.getenv('MINIO_ACCESS_KEY', 'minioadmin')
+    secret_key = os.getenv('MINIO_SECRET_KEY', 'minioadmin')
+
+    endpoint = raw_endpoint.split('://')[-1] if '://' in raw_endpoint else raw_endpoint
+    try:
+        return Minio(
+            endpoint,
+            access_key=access_key,
+            secret_key=secret_key,
+            secure=False,
+        )
+    except Exception as exc:
+        app.logger.error('Erro ao conectar no MinIO: %s', exc)
+        return None
+
+
+def serialize_user_dict(user: User) -> dict[str, Any]:
+    avatar_url = None
+    if getattr(user, 'avatar_key', None):
+        avatar_url = f"/api/profile/avatar/{user.avatar_key}"
+
+    return {
+        'id': int(user.id),
+        'nome': user.nome,
+        'email': user.email,
+        'role': user.role,
+        'bio': getattr(user, 'bio', '') or '',
+        'avatar_key': getattr(user, 'avatar_key', None),
+        'avatar_url': avatar_url,
+        'criado_em': user.criado_em.isoformat() if hasattr(user.criado_em, 'isoformat') else str(user.criado_em) if user.criado_em else None,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Perfil de Usuário & Upload (Atividade 6)
+# ---------------------------------------------------------------------------
+
+@app.get('/users/<int:target_id>')
+def get_user_profile(target_id: int):
+    with session_scope() as db:
+        user = db.get(User, target_id)
+        if not user:
+            return json_error('Usuário não encontrado.', 404)
+        return jsonify({'user': serialize_user_dict(user)})
+
+
+@app.put('/users/<int:target_id>')
+def update_user_profile(target_id: int):
+    current_user_id = session.get('user_id')
+    if not current_user_id:
+        return json_error('Faça login para continuar.', 401)
+
+    if int(current_user_id) != target_id:
+        log_event(
+            '403_editar_perfil',
+            usuario_id=int(current_user_id),
+            detalhe=f'tentativa_editar_usuario_id={target_id}',
+        )
+        return json_error('Você não tem permissão para editar este perfil.', 403)
+
+    payload = request.get_json(silent=True) or {}
+    nome = str(payload.get('nome', '')).strip()
+    bio = str(payload.get('bio', '')).strip()
+
+    if len(nome) < 2:
+        return json_error('O nome deve ter pelo menos 2 caracteres.')
+
+    if len(bio) > 500:
+        return json_error('A bio não pode exceder 500 caracteres.')
+
+    with session_scope() as db:
+        user = db.get(User, target_id)
+        if not user:
+            return json_error('Usuário não encontrado.', 404)
+
+        user.nome = nome
+        user.bio = bio
+        db.flush()
+
+        log_event('perfil_atualizado', usuario_id=target_id, detalhe=f'nome={nome}')
+        return jsonify({'ok': True, 'user': serialize_user_dict(user)})
+
+
+@app.post('/users/<int:target_id>/avatar')
+def upload_user_avatar(target_id: int):
+    current_user_id = session.get('user_id')
+    if not current_user_id:
+        return json_error('Faça login para continuar.', 401)
+
+    if int(current_user_id) != target_id:
+        log_event(
+            '403_upload_avatar',
+            usuario_id=int(current_user_id),
+            detalhe=f'tentativa_upload_usuario_id={target_id}',
+        )
+        return json_error('Você não tem permissão para editar este perfil.', 403)
+
+    if 'avatar' not in request.files and 'file' not in request.files:
+        return json_error('Nenhum arquivo de foto enviado.', 400)
+
+    file_obj = request.files.get('avatar') or request.files.get('file')
+    if not file_obj or not file_obj.filename:
+        return json_error('Arquivo inválido ou sem nome.', 400)
+
+    filename = file_obj.filename.lower()
+    allowed_exts = ('.png', '.jpg', '.jpeg', '.webp', '.gif')
+    if not any(filename.endswith(ext) for ext in allowed_exts):
+        return json_error('Formato de arquivo não permitido. Use PNG, JPG, WEBP ou GIF.', 400)
+
+    content_type = file_obj.content_type or ''
+    if content_type and not content_type.startswith('image/'):
+        return json_error('O arquivo enviado precisa ser uma imagem válida.', 400)
+
+    # Check file size (max 5 MB)
+    file_obj.seek(0, os.SEEK_END)
+    file_size = file_obj.tell()
+    file_obj.seek(0)
+
+    if file_size > 5 * 1024 * 1024:
+        return json_error('O tamanho da imagem excede o limite de 5MB.', 400)
+    if file_size == 0:
+        return json_error('O arquivo enviado está vazio.', 400)
+
+    ext = filename.rsplit('.', 1)[-1] if '.' in filename else 'jpg'
+    object_key = f'avatar_{target_id}_{int(datetime.now().timestamp())}.{ext}'
+    bucket_name = os.getenv('MINIO_BUCKET_NAME', 'tomhanks-avatars')
+
+    client = get_minio_client()
+    if not client:
+        return json_error('Serviço de armazenamento de objetos (MinIO) indisponível.', 503)
+
+    try:
+        if not client.bucket_exists(bucket_name):
+            client.make_bucket(bucket_name)
+            policy = {
+                "Version": "2012-10-17",
+                "Statement": [
+                    {
+                        "Effect": "Allow",
+                        "Principal": {"AWS": ["*"]},
+                        "Action": ["s3:GetObject"],
+                        "Resource": [f"arn:aws:s3:::{bucket_name}/*"]
+                    }
+                ]
             }
-        })
+            import json
+            try:
+                client.set_bucket_policy(bucket_name, json.dumps(policy))
+            except Exception:
+                pass
+
+        client.put_object(
+            bucket_name,
+            object_key,
+            file_obj,
+            length=file_size,
+            content_type=content_type or f'image/{ext}',
+        )
+    except Exception as exc:
+        app.logger.error('Erro no upload para MinIO: %s', exc)
+        return json_error('Falha ao armazenar arquivo no MinIO.', 500)
+
+    with session_scope() as db:
+        user = db.get(User, target_id)
+        if not user:
+            return json_error('Usuário não encontrado.', 404)
+        user.avatar_key = object_key
+        db.flush()
+        user_dict = serialize_user_dict(user)
+
+    log_event('avatar_atualizado', usuario_id=target_id, detalhe=f'key={object_key} size={file_size}')
+    return jsonify({'ok': True, 'user': user_dict})
 
 
 # ---------------------------------------------------------------------------

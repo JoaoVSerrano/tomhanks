@@ -5,6 +5,95 @@
 
 ---
 
+## Atividade 6 — Upload e Perfil de Usuário (Object Storage)
+
+> Atividade 6 (ISW055) · Professor: [@siriani](https://github.com/siriani)
+
+### Por que a imagem de perfil não mora no banco de dados
+
+Arquivos binários como imagens (JPEGs, PNGs) não pertencem ao banco de dados relacional (MariaDB/MySQL). Salvar imagens em colunas `BLOB` desnecessariamente infla o banco, torna os backups mais pesados e lentos, e degrada a performance de consultas estruturadas.
+
+A solução de arquitetura de mercado adotada é guardar o arquivo binário em um **Object Storage dedicado (MinIO/S3)** e persistir no banco de dados relacional MariaDB apenas a referência metadata (`avatar_key`, ex: `avatar_7_1790809193.png`).
+
+---
+
+### Decisão de Arquitetura: Bucket Público vs URL Pré-assinada (Trade-offs)
+
+Para a exibição da foto de perfil, foi escolhida a abordagem de **Bucket com Leitura Pública com Gateway Proxy na API**:
+
+- **Por que Bucket Público?**
+  - **Performance & Caching**: Fotos de perfil em redes sociais são mídias públicas por natureza. O acesso via bucket público com política de leitura (`s3:GetObject`) permite que navegadores e CDNs façam cache eficiente das imagens sem overhead de CPU para gerar assinaturas a cada renderização.
+  - **Simplicidade & Escala**: Evita o processamento repetitivo de URLs com expiração (presigned URLs) no servidor para cada item de lista ou perfil exibido.
+- **Trade-off com URLs Pré-assinadas**:
+  - URLs pré-assinadas com tempo de expiração seriam a escolha correta para dados privados (ex: exames médicos, documentos financeiros, comprovantes). Para avatares de rede social, adicionar expiração geraria complexidade desnecessária e quebraria o cache do navegador a cada expiração.
+
+---
+
+### Controle de Acesso — Cada usuário só edita o próprio perfil (Regra 403)
+
+O controle de identidade é estritamente aplicado no backend (servidor), reaproveitando a sessão autenticada da Atividade 4:
+- Ao receber `PUT /api/profile/<user_id>` ou `POST /api/profile/<user_id>/avatar`, o backend valida se `session['user_id'] == user_id`.
+- Se o usuário `Bob` (ID 8) tentar alterar o nome, bio ou enviar uma foto para o perfil da `Alice` (ID 7), a requisição é **recusada imediatamente com HTTP 403 Forbidden**:
+  ```json
+  {
+    "error": "Você não tem permissão para editar este perfil."
+  }
+  ```
+- Todas as tentativas de violação de perfil são gravadas no log de auditoria (`403_editar_perfil`, `403_upload_avatar`).
+
+---
+
+### Mapeamento de Endpoints do Perfil e Upload
+
+| Método | Rota | Descrição | Permissão |
+|---|---|---|---|
+| `GET` | `/api/profile/<user_id>` | Retorna dados do usuário (nome, bio, avatar) e lista de filmes favoritados | Público / Autenticado |
+| `PUT` | `/api/profile/<user_id>` | Atualiza nome e bio do perfil | Apenas o próprio usuário (403 se diferente) |
+| `POST` | `/api/profile/<user_id>/avatar` | Upload de imagem de perfil para o MinIO (máx 5MB, PNG/JPG/WEBP/GIF) | Apenas o próprio usuário (403 se diferente) |
+| `GET` | `/api/profile/avatar/<key>` | Proxy/Stream da imagem do MinIO diretamente ao cliente | Leitura pública |
+
+---
+
+### Estrutura dos Containers com MinIO
+
+```yaml
+services:
+  # Object Storage MinIO para fotos de perfil (Atividade 6)
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+    networks:
+      - tomhanks-net
+
+  # Microsserviço de Autenticação & Usuários
+  auth-service:
+    environment:
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_BUCKET_NAME: tomhanks-avatars
+```
+
+---
+
+### Como Testar a Atividade 6
+
+Para executar o script automatizado de teste e demonstração da Atividade 6:
+
+```bash
+bash demo_profile.sh
+```
+
+---
+
 ## Atividade 5 — Logs e Auditoria
 
 ### Por que um microsserviço próprio, e por que Redis Streams

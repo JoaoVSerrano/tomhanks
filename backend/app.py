@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import requests
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, Response, jsonify, request, send_from_directory
 from sqlalchemy import delete, select
 
 from backend.database import session_scope, upgrade_database
@@ -474,6 +474,94 @@ def admin_list_logs():
     except requests.RequestException as exc:
         app.logger.error('log-service indisponível em admin_list_logs: %s', exc)
         return json_error('Serviço de log indisponível.', 503)
+
+
+# ---------------------------------------------------------------------------
+# Perfil de usuário & Upload de Avatar (Atividade 6)
+# ---------------------------------------------------------------------------
+
+@app.get('/api/profile/<int:user_id>')
+def get_user_profile(user_id: int):
+    """Retorna os dados do perfil do usuário e a lista de filmes favoritados por ele."""
+    try:
+        resp = _forward_to_auth('GET', f'/users/{user_id}')
+        if resp.status_code != 200:
+            return _proxy_auth('GET', f'/users/{user_id}')
+        user_data = resp.json().get('user', {})
+    except Exception as exc:
+        app.logger.error('Erro ao buscar perfil no auth-service: %s', exc)
+        return json_error('Serviço de autenticação indisponível.', 503)
+
+    # Busca os favoritos do usuário no MariaDB local
+    with session_scope() as db:
+        fav_rows = db.scalars(
+            select(Favorite).where(Favorite.usuario_id == user_id).order_by(Favorite.criado_em.desc())
+        ).all()
+        favorites = [
+            {
+                'id': int(f.id),
+                'tmdb_movie_id': int(f.tmdb_movie_id),
+                'title': f.titulo,
+                'poster_path': f.poster_path,
+                'poster_url': normalize_poster_path(f.poster_path),
+                'criado_em': f.criado_em.isoformat() if hasattr(f.criado_em, 'isoformat') else f.criado_em,
+            }
+            for f in fav_rows
+        ]
+
+    return jsonify({
+        'user': user_data,
+        'favorites': favorites,
+        'favorite_count': len(favorites),
+    })
+
+
+@app.put('/api/profile/<int:user_id>')
+def update_user_profile(user_id: int):
+    """Atualiza o perfil do usuário (nome e bio). Regra 403 tratada no auth-service."""
+    return _proxy_auth('PUT', f'/users/{user_id}', json=request.get_json(silent=True) or {})
+
+
+@app.post('/api/profile/<int:user_id>/avatar')
+def upload_user_avatar(user_id: int):
+    """Realiza upload de imagem de perfil do usuário. Regra 403 tratada no auth-service."""
+    if 'avatar' not in request.files and 'file' not in request.files:
+        return json_error('Nenhum arquivo enviado.', 400)
+
+    file_obj = request.files.get('avatar') or request.files.get('file')
+    if not file_obj or not file_obj.filename:
+        return json_error('Arquivo inválido.', 400)
+
+    files = {'avatar': (file_obj.filename, file_obj.stream, file_obj.content_type or 'image/jpeg')}
+    return _proxy_auth('POST', f'/users/{user_id}/avatar', files=files)
+
+
+@app.get('/api/profile/avatar/<path:key>')
+def serve_user_avatar(key: str):
+    """Serve a imagem de avatar do MinIO diretamente aos clientes."""
+    from minio import Minio
+    raw_endpoint = os.getenv('MINIO_ENDPOINT', 'minio:9000')
+    access_key = os.getenv('MINIO_ACCESS_KEY', 'minioadmin')
+    secret_key = os.getenv('MINIO_SECRET_KEY', 'minioadmin')
+    bucket_name = os.getenv('MINIO_BUCKET_NAME', 'tomhanks-avatars')
+
+    endpoint = raw_endpoint.split('://')[-1] if '://' in raw_endpoint else raw_endpoint
+    try:
+        client = Minio(endpoint, access_key=access_key, secret_key=secret_key, secure=False)
+        response = client.get_object(bucket_name, key)
+        content_type = 'image/png'
+        key_lower = key.lower()
+        if key_lower.endswith(('.jpg', '.jpeg')):
+            content_type = 'image/jpeg'
+        elif key_lower.endswith('.webp'):
+            content_type = 'image/webp'
+        elif key_lower.endswith('.gif'):
+            content_type = 'image/gif'
+
+        return Response(response.read(), content_type=content_type)
+    except Exception as exc:
+        app.logger.warning('Avatar key=%s não encontrado no MinIO: %s', key, exc)
+        return json_error('Avatar não encontrado.', 404)
 
 
 # ---------------------------------------------------------------------------

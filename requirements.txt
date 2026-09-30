@@ -4,3 +4,4 @@ alembic==1.14.0
 gunicorn==23.0.0
 mysql-connector-python==9.0.0
 requests==2.32.3
+minio==7.2.7

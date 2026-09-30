@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, ForeignKey, Integer, String, TIMESTAMP, text
+from sqlalchemy import Boolean, ForeignKey, Integer, String, Text, TIMESTAMP, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .database import Base
@@ -16,6 +16,8 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(150), nullable=False, unique=True)
     senha_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[str] = mapped_column(String(20), nullable=False, server_default='usuario')
+    bio: Mapped[str | None] = mapped_column(Text, nullable=True)
+    avatar_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
     criado_em: Mapped[datetime] = mapped_column(TIMESTAMP, server_default=text('CURRENT_TIMESTAMP'))
 
     reset_tokens = relationship('ResetToken', back_populates='user', cascade='all, delete-orphan')
