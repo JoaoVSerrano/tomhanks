@@ -31,6 +31,40 @@ def json_error(message: str, status: int = 400):
 
 
 # ---------------------------------------------------------------------------
+# Log de auditoria — envia evento ao log-service (fire-and-forget)
+# ---------------------------------------------------------------------------
+
+def log_service_url() -> str:
+    return os.getenv('LOG_SERVICE_URL', 'http://log-service:4000')
+
+
+def log_event(
+    acao: str,
+    usuario_id: int | None = None,
+    detalhe: str = '',
+) -> None:
+    """Envia evento de auditoria ao log-service. Nunca propaga erros."""
+    import requests as _requests
+    try:
+        ip = request.headers.get('X-Forwarded-For', request.remote_addr or '')
+        if ip:
+            ip = ip.split(',')[0].strip()
+        _requests.post(
+            f'{log_service_url()}/log',
+            json={
+                'usuario_id': usuario_id,
+                'acao': acao,
+                'detalhe': detalhe,
+                'ip': ip,
+            },
+            headers={'X-Internal-Token': INTERNAL_TOKEN},
+            timeout=3,
+        )
+    except Exception as exc:
+        app.logger.warning('log-service indisponível (evento=%s): %s', acao, exc)
+
+
+# ---------------------------------------------------------------------------
 # CORS (permite chamadas do catálogo via rede interna e do frontend)
 # ---------------------------------------------------------------------------
 
@@ -251,9 +285,11 @@ def login():
     with session_scope() as db:
         user = db.scalar(select(User).where(User.email == email))
         if not user or not check_password_hash(user.senha_hash, senha):
+            log_event('login_falhou', detalhe=f'email={email}')
             return json_error('Credenciais inválidas.', 401)
 
         session['user_id'] = int(user.id)
+        log_event('login', usuario_id=int(user.id), detalhe=f'email={email}')
         return jsonify({
             'user': {
                 'id': int(user.id),
@@ -271,6 +307,8 @@ def login():
 
 @app.post('/logout')
 def logout():
+    uid = session.get('user_id')
+    log_event('logout', usuario_id=int(uid) if uid is not None else None)
     session.clear()
     return jsonify({'ok': True})
 

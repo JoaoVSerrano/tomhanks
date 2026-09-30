@@ -36,6 +36,10 @@ def auth_service_url() -> str:
     return os.getenv('AUTH_SERVICE_URL', 'http://auth-service:3000')
 
 
+def log_service_url() -> str:
+    return os.getenv('LOG_SERVICE_URL', 'http://log-service:4000')
+
+
 def internal_token() -> str:
     return os.getenv('INTERNAL_TOKEN', '')
 
@@ -94,6 +98,41 @@ def _proxy_auth(method: str, path: str, **kwargs):
         response.headers.add('Set-Cookie', header)
 
     return response
+
+
+# ---------------------------------------------------------------------------
+# Log de auditoria — envia evento ao log-service (fire-and-forget)
+# ---------------------------------------------------------------------------
+
+def log_event(
+    acao: str,
+    usuario_id: int | None = None,
+    detalhe: str = '',
+) -> None:
+    """Envia um evento de auditoria ao log-service de forma assíncrona.
+
+    Erros de conectividade são registrados no log do app mas nunca
+    propagam para o usuário — auditoria nunca deve travar a ação.
+    """
+    try:
+        ip = request.headers.get('X-Forwarded-For', request.remote_addr or '')
+        if ip:
+            # X-Forwarded-For pode ter múltiplos IPs; pega o primeiro
+            ip = ip.split(',')[0].strip()
+
+        requests.post(
+            f'{log_service_url()}/log',
+            json={
+                'usuario_id': usuario_id,
+                'acao': acao,
+                'detalhe': detalhe,
+                'ip': ip,
+            },
+            headers={'X-Internal-Token': internal_token()},
+            timeout=3,
+        )
+    except Exception as exc:
+        app.logger.warning('log-service indisponível (evento=%s): %s', acao, exc)
 
 
 # ---------------------------------------------------------------------------
@@ -332,12 +371,35 @@ def register():
 
 @app.post('/api/auth/login')
 def login():
-    return _proxy_auth('POST', '/login', json=request.get_json(silent=True) or {})
+    payload = request.get_json(silent=True) or {}
+    response = _proxy_auth('POST', '/login', json=payload)
+    # Loga o evento apenas quando o login for bem-sucedido
+    if response.status_code == 200:
+        try:
+            user_data = response.get_json()
+            uid = user_data.get('user', {}).get('id') if user_data else None
+            email = payload.get('email', '')
+            log_event('login', usuario_id=uid, detalhe=f'email={email}')
+        except Exception:
+            log_event('login', detalhe=f"email={payload.get('email', '')}")
+    elif response.status_code == 401:
+        log_event('login_falhou', detalhe=f"email={payload.get('email', '')}")
+    return response
 
 
 @app.post('/api/auth/logout')
 def logout():
-    return _proxy_auth('POST', '/logout')
+    # Obtém o usuário atual antes de deslogar para registrar o ID
+    uid = None
+    try:
+        me_resp = _forward_to_auth('GET', '/me')
+        if me_resp.status_code == 200:
+            uid = me_resp.json().get('user', {}).get('id')
+    except Exception:
+        pass
+    response = _proxy_auth('POST', '/logout')
+    log_event('logout', usuario_id=uid)
+    return response
 
 
 @app.post('/api/auth/forgot-password')
@@ -370,6 +432,48 @@ def admin_list_users():
 def admin_change_role(target_id: int):
     """Promove ou rebaixa o papel de um usuário. Exclusivo de admin (enforced no auth-service)."""
     return _proxy_auth('POST', f'/admin/users/{target_id}/role', json=request.get_json(silent=True) or {})
+
+
+@app.get('/api/admin/logs')
+def admin_list_logs():
+    """Retorna os últimos N eventos de auditoria. Exclusivo de admin.
+
+    Query params:
+        n     : int (padrão 50, máx 500) — quantos eventos retornar
+        start : str                       — ID de início do range (XRANGE notation)
+        end   : str                       — ID de fim do range
+
+    Usuário comum tentando acessar recebe 403.
+    """
+    admin_user, err = require_role('admin')
+    if err:
+        # Loga tentativa de acesso negado (403)
+        uid = None
+        try:
+            resp = _forward_to_auth('GET', '/me')
+            if resp.status_code == 200:
+                uid = resp.json().get('user', {}).get('id')
+        except Exception:
+            pass
+        log_event('403_acesso_logs', usuario_id=uid, detalhe='tentativa de acesso ao log de auditoria')
+        return err
+
+    n = request.args.get('n', '50')
+    start = request.args.get('start', '-')
+    end = request.args.get('end', '+')
+
+    try:
+        resp = requests.get(
+            f'{log_service_url()}/logs',
+            params={'n': n, 'start': start, 'end': end},
+            headers={'X-Internal-Token': internal_token()},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        return jsonify(resp.json())
+    except requests.RequestException as exc:
+        app.logger.error('log-service indisponível em admin_list_logs: %s', exc)
+        return json_error('Serviço de log indisponível.', 503)
 
 
 # ---------------------------------------------------------------------------
@@ -500,6 +604,7 @@ def create_favorite():
             favorite.titulo = movie['title']
             favorite.poster_path = movie.get('poster_path')
 
+        log_event('favoritar', usuario_id=user_id, detalhe=f'movie_id={movie_id} title={movie["title"]!r}')
         return jsonify(
             {
                 'ok': True,
@@ -523,6 +628,7 @@ def delete_favorite(movie_id: int):
         result = db.execute(
             delete(Favorite).where(Favorite.usuario_id == user_id, Favorite.tmdb_movie_id == movie_id)
         )
+        log_event('desfavoritar', usuario_id=user_id, detalhe=f'movie_id={movie_id}')
         return jsonify({'ok': True, 'deleted': result.rowcount > 0})
 
 
@@ -593,6 +699,7 @@ def create_comment():
         db.add(comment)
         db.flush()
         db.refresh(comment)
+        log_event('comentar', usuario_id=user_id, detalhe=f'movie_id={movie_id} comment_id={comment.id}')
         return jsonify(
             {
                 'ok': True,
@@ -628,8 +735,15 @@ def delete_comment(comment_id: int):
             # Se não deletou nada e não é admin, pode ser que o comentário pertence a outro usuário
             comment_exists = db.scalar(select(Comment).where(Comment.id == comment_id))
             if comment_exists:
+                log_event(
+                    '403_apagar_comentario',
+                    usuario_id=user_id,
+                    detalhe=f'comment_id={comment_id} motivo=sem_permissao',
+                )
                 return json_error('Sem permissão para apagar este comentário.', 403)
 
+        acao = 'moderacao_apagar_comentario' if is_admin else 'apagar_comentario'
+        log_event(acao, usuario_id=user_id, detalhe=f'comment_id={comment_id} deleted={deleted}')
         return jsonify({'ok': True, 'deleted': deleted})
 
 

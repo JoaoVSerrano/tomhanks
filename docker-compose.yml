@@ -1,5 +1,40 @@
 services:
   # ─────────────────────────────────────────────────────────────────────────
+  # Redis — banco de dados do log-service (Redis Streams)
+  # Sem porta publicada — só acessível na rede interna
+  # ─────────────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    # Sem "ports:" — invisível para o host, apenas na rede interna
+    networks:
+      - tomhanks-net
+    restart: unless-stopped
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Microsserviço de log e auditoria — NÃO publica porta para o host
+  # Acessível internamente pelo nome "log-service" na rede Docker
+  # Persiste eventos em Redis Streams (XADD / XRANGE)
+  # ─────────────────────────────────────────────────────────────────────────
+  log-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.log
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      INTERNAL_TOKEN: ${INTERNAL_TOKEN:-internal-change-me}
+      LOG_PORT: 4000
+      MAX_LOG_ENTRIES: 10000
+    # Sem "ports:" — serviço invisível para o host, apenas na rede interna
+    depends_on:
+      - redis
+    networks:
+      - tomhanks-net
+    restart: unless-stopped
+
+  # ─────────────────────────────────────────────────────────────────────────
   # Microsserviço de autenticação — NÃO publica porta para o host
   # Acessível internamente pelo nome "auth-service" na rede Docker
   # ─────────────────────────────────────────────────────────────────────────
@@ -29,9 +64,13 @@ services:
       PASSWORD_RESET_EXPOSE_LINK: ${PASSWORD_RESET_EXPOSE_LINK:-0}
       # URL do frontend para montar o link de reset
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:8080}
-      # Token interno para chamadas catálogo → auth-service
+      # Token interno para chamadas catálogo → auth-service e log-service
       INTERNAL_TOKEN: ${INTERNAL_TOKEN:-internal-change-me}
+      # URL interna do log-service
+      LOG_SERVICE_URL: http://log-service:4000
     # Sem "ports:" — serviço invisível para o host, apenas na rede interna
+    depends_on:
+      - log-service
     networks:
       - tomhanks-net
     restart: unless-stopped
@@ -59,10 +98,13 @@ services:
       # URL interna do auth-service (pelo nome do serviço Docker)
       AUTH_SERVICE_URL: http://auth-service:3000
       INTERNAL_TOKEN: ${INTERNAL_TOKEN:-internal-change-me}
+      # URL interna do log-service
+      LOG_SERVICE_URL: http://log-service:4000
     ports:
       - "${PORT:-8080}:${PORT:-8080}"
     depends_on:
       - auth-service
+      - log-service
     networks:
       - tomhanks-net
     restart: unless-stopped
@@ -74,3 +116,6 @@ networks:
       driver: default
       config:
         - subnet: 10.200.200.0/28
+
+volumes:
+  redis-data:

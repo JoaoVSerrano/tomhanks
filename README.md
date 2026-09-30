@@ -5,6 +5,106 @@
 
 ---
 
+## Atividade 5 — Logs e Auditoria
+
+### Por que um microsserviço próprio, e por que Redis Streams
+
+Toda ação relevante do sistema — login, logout, favoritar, comentar, moderar — deixa agora um rastro num microsserviço dedicado (`log-service`), separado do catálogo e do auth-service. Log de auditoria tem padrão de uso distinto de dado de negócio: **escreve muito, lê pouco, nunca precisa de transação complexa**. Por isso vira um serviço à parte, e por isso o banco relacional (MariaDB) não é a ferramenta certa aqui.
+
+**Redis Streams** (comandos `XADD` para gravar, `XREVRANGE` para consultar) foi escolhido por:
+- Escrita em alto volume com latência mínima
+- Ordenação nativa por timestamp no próprio ID do stream
+- Trim automático (`MAXLEN ~`) para não crescer indefinidamente
+- Persistência via `--appendonly yes` (AOF) no container Redis
+
+### Arquitetura
+
+```
+Internet
+    │
+    ▼
+┌──────────────────────────┐
+│  tomhanks-app :8080      │  ← único ponto de entrada público
+│  (catálogo + frontend)   │
+│                          │
+│  /api/auth/*  → proxy ─────────────────────────────┐
+│  /api/admin/logs → proxy ──────────────────────┐   │
+│  /api/catalog            │                     │   │
+│  /api/favorites          │                     │   │
+│  /api/comments           │                     │   │
+└──────────────────────────┘                     │   │
+           ▲ rede: tomhanks-net                  │   │
+           │                                     ▼   ▼
+           │                     ┌────────────────────────────────┐
+           │                     │  log-service :4000             │
+           │                     │  (auditoria — Redis Streams)   │
+           │                     │  ⚠  SEM ports publicados       │
+           │                     └────────────────────────────────┘
+           │                                     │
+           │                                     ▼
+           │                     ┌────────────────────────────────┐
+           │                     │  redis :6379                   │
+           │                     │  (Stream: audit:logs)          │
+           │                     │  ⚠  SEM ports publicados       │
+           │                     └────────────────────────────────┘
+           │
+           ▼
+┌──────────────────────────────────────────────────────────────────┐
+│  auth-service :3000                                              │
+│  (login · cadastro · roles · esqueci minha senha · Mailtrap)    │
+│  ⚠  SEM ports publicados — invisível para o host                 │
+└──────────────────────────────────────────────────────────────────┘
+           │
+           ▼
+     MySQL (cloud)
+```
+
+### Eventos auditados
+
+| Evento | Ação gravada |
+|---|---|
+| Login bem-sucedido | `login` |
+| Login com credenciais erradas | `login_falhou` |
+| Logout | `logout` |
+| Favoritar filme | `favoritar` |
+| Desfavoritar filme | `desfavoritar` |
+| Criar comentário | `comentar` |
+| Apagar próprio comentário | `apagar_comentario` |
+| Admin apaga comentário de outro usuário | `moderacao_apagar_comentario` |
+| Usuário comum tenta apagar comentário alheio | `403_apagar_comentario` |
+| Usuário comum tenta acessar `GET /api/admin/logs` | `403_acesso_logs` |
+
+### Estrutura mínima de cada log
+
+```json
+{
+  "event_id": "1727746800000-0",
+  "usuario_id": "42",
+  "acao": "login",
+  "detalhe": "email=joao@example.com",
+  "ip": "172.20.0.5",
+  "ts_ms": 1727746800000
+}
+```
+
+### Endpoint de consulta — só admin
+
+| Método | Rota | Descrição |
+|---|---|---|
+| `GET` | `/api/admin/logs?n=50` | Lista os últimos N eventos de auditoria (máx 500) |
+
+Usuário comum tentando acessar recebe **HTTP 403**, e a tentativa fica registrada no próprio log.
+
+### Novos serviços no docker-compose
+
+```yaml
+redis:          # Redis 7 Alpine — persistência AOF — sem porta pública
+log-service:    # Flask + redis-py — API interna de auditoria — sem porta pública
+```
+
+---
+
+
 ## Atividade 4 — Controle de Acesso por Papel (RBAC)
 
 ### Permissões por papel
