@@ -5,6 +5,65 @@
 
 ---
 
+## Atividade Extra — Documentação Swagger/OpenAPI
+
+> Atividade Extra (ISW055) · Professor: [@siriani](https://github.com/siriani)
+
+### Visão Geral
+
+Todos os contratos de API de todos os microsserviços desenvolvidos na disciplina foram consolidados e padronizados no formato **OpenAPI 3.0**, permitindo a visualização interativa e testes diretos ("Try it out") pelo navegador via **Swagger UI**.
+
+---
+
+### Links de Acesso
+
+| Recurso | URL / Rota | Descrição |
+|---|---|---|
+| **Swagger UI Interativo** | `http://localhost:8080/apidocs` | Interface web gráfica para explorar e testar cada endpoint |
+| **OpenAPI Spec (JSON)** | `http://localhost:8080/api/docs/openapi.json` | Especificação completa em JSON (`openapi.json`) |
+| **OpenAPI Spec (YAML)** | `http://localhost:8080/api/docs/openapi.yaml` | Especificação completa em YAML (`openapi.yaml`) |
+
+---
+
+### Cobertura de Endpoints Documentados (17 Endpoints)
+
+1. **Health**:
+   - `GET /api/health`: Status de saúde da aplicação
+2. **Catálogo TMDB**:
+   - `GET /api/catalog`: Listar filmes do Tom Hanks com contadores e estado da conta
+3. **Autenticação & Contas (`auth-service`)**:
+   - `POST /api/auth/register`: Registro de novos usuários
+   - `POST /api/auth/login`: Autenticação e criação de sessão
+   - `POST /api/auth/logout`: Encerramento de sessão
+   - `GET /api/auth/me`: Obter dados da sessão do usuário logado
+   - `POST /api/auth/forgot-password`: Solicitação de e-mail de redefinição de senha
+4. **Perfil & Object Storage (`MinIO`)**:
+   - `GET /api/profile/<user_id>`: Dados do perfil (nome, bio, avatar) e lista de favoritos
+   - `PUT /api/profile/<user_id>`: Atualizar nome e bio (com validação 403 para terceiros)
+   - `POST /api/profile/<user_id>/avatar`: Upload de foto de perfil no MinIO (PNG/JPG até 5MB)
+   - `GET /api/profile/avatar/<key>`: Stream direto do avatar armazenado no MinIO
+5. **Favoritos & Comentários**:
+   - `POST /api/favorites`: Favoritar filme
+   - `DELETE /api/favorites/<tmdb_movie_id>`: Desfavoritar filme
+   - `POST /api/comments`: Criar comentário em um filme
+   - `DELETE /api/comments/<comment_id>`: Apagar comentário (próprio usuário ou admin)
+6. **Administração & Auditoria (`log-service` / Redis Streams)**:
+   - `GET /api/admin/users`: Listar todos os usuários (exclusivo admin)
+   - `POST /api/admin/users/<target_id>/role`: Promover/rebaixar papel do usuário (exclusivo admin)
+   - `GET /api/admin/logs`: Consultar eventos no Redis Streams (exclusivo admin - 403 gravado no log)
+
+---
+
+### Como Testar a Documentação
+
+Para executar o script de teste e verificação automatizada da documentação Swagger/OpenAPI:
+
+```bash
+bash demo_swagger.sh
+```
+
+---
+
 ## Atividade 6 — Upload e Perfil de Usuário (Object Storage)
 
 > Atividade 6 (ISW055) · Professor: [@siriani](https://github.com/siriani)

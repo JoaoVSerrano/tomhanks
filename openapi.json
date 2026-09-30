@@ -1,0 +1,952 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Catálogo Tom Hanks — API Specification",
+    "description": "Documentação padronizada OpenAPI 3.0 / Swagger UI para a aplicação do Catálogo de Filmes do Tom Hanks.\n\nInclui todos os microsserviços:\n- **Catálogo & Filmes**: Consulta da TMDB, favoritos e comentários\n- **Autenticação**: Registro, Login, Logout, Sessão e Recuperação de Senha\n- **Perfil & Upload (MinIO)**: Foto de perfil no Object Storage e Bio\n- **Auditoria & Log (Redis Streams)**: Registro e consulta administrativa de logs de auditoria\n\nProfessor: Allan Siriani (ISW055 — Introdução à Computação em Nuvem)",
+    "version": "1.0.0",
+    "contact": {
+      "name": "Allan Siriani (Professor)",
+      "url": "https://github.com/siriani"
+    }
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8080",
+      "description": "Servidor Local / Gateway da Aplicação"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Health",
+      "description": "Status de saúde da aplicação"
+    },
+    {
+      "name": "Catálogo",
+      "description": "Consulta de filmes do Tom Hanks (integração TMDB)"
+    },
+    {
+      "name": "Autenticação",
+      "description": "Gerenciamento de contas, login e sessões"
+    },
+    {
+      "name": "Perfil & Upload",
+      "description": "Perfil de usuário, biografia e foto no MinIO Object Storage"
+    },
+    {
+      "name": "Favoritos",
+      "description": "Favoritar e desfavoritar filmes"
+    },
+    {
+      "name": "Comentários",
+      "description": "Criação e remoção de comentários em filmes"
+    },
+    {
+      "name": "Administração & Auditoria",
+      "description": "Gestão de papéis e logs de auditoria no Redis Streams"
+    }
+  ],
+  "paths": {
+    "/api/health": {
+      "get": {
+        "tags": [
+          "Health"
+        ],
+        "summary": "Healthcheck do sistema",
+        "description": "Verifica se a aplicação Flask e o gateway estão funcionando corretamente.",
+        "responses": {
+          "200": {
+            "description": "Sistema operando normalmente",
+            "content": {
+              "application/json": {
+                "example": {
+                  "ok": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/catalog": {
+      "get": {
+        "tags": [
+          "Catálogo"
+        ],
+        "summary": "Listar filmes do catálogo com status da conta",
+        "description": "Retorna os filmes de Tom Hanks obtidos da TMDB, marcando os favoritos e comentários do usuário logado.",
+        "responses": {
+          "200": {
+            "description": "Lista de filmes do catálogo",
+            "content": {
+              "application/json": {
+                "example": {
+                  "user_id": 7,
+                  "movies": [
+                    {
+                      "tmdb_movie_id": 13,
+                      "title": "Forrest Gump: O Contador de Histórias",
+                      "overview": "A história de um homem simples...",
+                      "poster_url": "https://image.tmdb.org/t/p/w500/d74WpIsH8379TIL4wUxDneRCYv2.jpg",
+                      "release_date": "1994-06-23",
+                      "is_favorite": true,
+                      "comment_count": 1,
+                      "comments": [
+                        {
+                          "id": 1,
+                          "tmdb_movie_id": 13,
+                          "texto": "Filme inesquecível!",
+                          "criado_em": "2026-09-30T22:00:00"
+                        }
+                      ]
+                    }
+                  ],
+                  "stats": {
+                    "favorite_count": 1,
+                    "comment_count": 1
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/register": {
+      "post": {
+        "tags": [
+          "Autenticação"
+        ],
+        "summary": "Criar nova conta de usuário",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "nome",
+                  "email",
+                  "senha"
+                ],
+                "properties": {
+                  "nome": {
+                    "type": "string",
+                    "example": "Alice Santos"
+                  },
+                  "email": {
+                    "type": "string",
+                    "example": "alice@exemplo.com"
+                  },
+                  "senha": {
+                    "type": "string",
+                    "example": "senha123456"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Conta criada com sucesso",
+            "content": {
+              "application/json": {
+                "example": {
+                  "user": {
+                    "id": 7,
+                    "nome": "Alice Santos",
+                    "email": "alice@exemplo.com",
+                    "role": "usuario",
+                    "bio": "",
+                    "avatar_key": null,
+                    "avatar_url": null,
+                    "criado_em": "2026-09-30T22:59:51"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Dados de entrada inválidos",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": "Informe um e-mail válido."
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflito: e-mail já cadastrado",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": "Já existe uma conta com esse e-mail."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/login": {
+      "post": {
+        "tags": [
+          "Autenticação"
+        ],
+        "summary": "Realizar login e iniciar sessão",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "email",
+                  "senha"
+                ],
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "example": "alice@exemplo.com"
+                  },
+                  "senha": {
+                    "type": "string",
+                    "example": "senha123456"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Login realizado com sucesso",
+            "content": {
+              "application/json": {
+                "example": {
+                  "user": {
+                    "id": 7,
+                    "nome": "Alice Santos",
+                    "email": "alice@exemplo.com",
+                    "role": "usuario",
+                    "bio": "Entusiasta de cinema.",
+                    "avatar_key": "avatar_7_1790809193.png",
+                    "avatar_url": "/api/profile/avatar/avatar_7_1790809193.png",
+                    "criado_em": "2026-09-30T22:59:51"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Credenciais inválidas",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": "Credenciais inválidas."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/logout": {
+      "post": {
+        "tags": [
+          "Autenticação"
+        ],
+        "summary": "Encerrar sessão atual",
+        "responses": {
+          "200": {
+            "description": "Sessão encerrada",
+            "content": {
+              "application/json": {
+                "example": {
+                  "ok": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/me": {
+      "get": {
+        "tags": [
+          "Autenticação"
+        ],
+        "summary": "Obter dados do usuário logado na sessão",
+        "responses": {
+          "200": {
+            "description": "Usuário autenticado",
+            "content": {
+              "application/json": {
+                "example": {
+                  "user": {
+                    "id": 7,
+                    "nome": "Alice Santos",
+                    "email": "alice@exemplo.com",
+                    "role": "usuario",
+                    "bio": "Fã de Tom Hanks",
+                    "avatar_url": "/api/profile/avatar/avatar_7_1790809193.png"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Não autenticado",
+            "content": {
+              "application/json": {
+                "example": {
+                  "user": null
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/forgot-password": {
+      "post": {
+        "tags": [
+          "Autenticação"
+        ],
+        "summary": "Solicitar link de recuperação de senha por e-mail",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "email"
+                ],
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "example": "alice@exemplo.com"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "E-mail de recuperação enviado",
+            "content": {
+              "application/json": {
+                "example": {
+                  "ok": true,
+                  "message": "Se o e-mail existir, enviamos instruções para redefinição."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/profile/{user_id}": {
+      "get": {
+        "tags": [
+          "Perfil & Upload"
+        ],
+        "summary": "Consultar perfil completo do usuário e seus favoritos",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "example": 7
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Perfil retornado com sucesso",
+            "content": {
+              "application/json": {
+                "example": {
+                  "user": {
+                    "id": 7,
+                    "nome": "Alice Santos",
+                    "email": "alice@exemplo.com",
+                    "role": "usuario",
+                    "bio": "Engenheira Cloud & Entusiasta de cinema.",
+                    "avatar_key": "avatar_7_1790809193.png",
+                    "avatar_url": "/api/profile/avatar/avatar_7_1790809193.png",
+                    "criado_em": "2026-09-30T22:59:51"
+                  },
+                  "favorite_count": 1,
+                  "favorites": [
+                    {
+                      "id": 1,
+                      "tmdb_movie_id": 13,
+                      "title": "Forrest Gump: O Contador de Histórias",
+                      "poster_url": "https://image.tmdb.org/t/p/w500/d74WpIsH8379TIL4wUxDneRCYv2.jpg"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Usuário não encontrado",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": "Usuário não encontrado."
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Perfil & Upload"
+        ],
+        "summary": "Atualizar perfil de usuário (nome e bio)",
+        "description": "Permite que um usuário atualize seu próprio nome e biografia. Tentativas de alterar o perfil de terceiros retornam 403 Forbidden.",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "example": 7
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "nome": {
+                    "type": "string",
+                    "example": "Alice Santos Cloud"
+                  },
+                  "bio": {
+                    "type": "string",
+                    "example": "Engenheira Cloud & Entusiasta de cinema."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Perfil atualizado",
+            "content": {
+              "application/json": {
+                "example": {
+                  "ok": true,
+                  "user": {
+                    "id": 7,
+                    "nome": "Alice Santos Cloud",
+                    "bio": "Engenheira Cloud & Entusiasta de cinema."
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Não autenticado",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": "Faça login para continuar."
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Acesso negado: tentativa de editar o perfil de outro usuário",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": "Você não tem permissão para editar este perfil."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/profile/{user_id}/avatar": {
+      "post": {
+        "tags": [
+          "Perfil & Upload"
+        ],
+        "summary": "Upload de foto de perfil no MinIO Object Storage",
+        "description": "Envia um arquivo de imagem (PNG, JPG, WEBP, GIF até 5MB) para o bucket de objetos MinIO. Tentativas de enviar para outro usuário retornam 403 Forbidden.",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "example": 7
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "avatar": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "Arquivo de imagem (máx 5MB)"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Imagem enviada e armazenada com sucesso no MinIO",
+            "content": {
+              "application/json": {
+                "example": {
+                  "ok": true,
+                  "user": {
+                    "id": 7,
+                    "avatar_key": "avatar_7_1790809193.png",
+                    "avatar_url": "/api/profile/avatar/avatar_7_1790809193.png"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Arquivo inválido ou tamanho excedido",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": "O tamanho da imagem excede o limite de 5MB."
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Acesso negado ao enviar foto para perfil alheio",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": "Você não tem permissão para editar este perfil."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/profile/avatar/{key}": {
+      "get": {
+        "tags": [
+          "Perfil & Upload"
+        ],
+        "summary": "Obter/Servir imagem de perfil diretamente do MinIO",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "avatar_7_1790809193.png"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Arquivo binário da imagem (image/png, image/jpeg, etc.)",
+            "content": {
+              "image/png": {},
+              "image/jpeg": {},
+              "image/webp": {}
+            }
+          },
+          "404": {
+            "description": "Avatar não encontrado no MinIO",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": "Avatar não encontrado."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/favorites": {
+      "post": {
+        "tags": [
+          "Favoritos"
+        ],
+        "summary": "Favoritar um filme",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "tmdb_movie_id"
+                ],
+                "properties": {
+                  "tmdb_movie_id": {
+                    "type": "integer",
+                    "example": 13
+                  },
+                  "titulo": {
+                    "type": "string",
+                    "example": "Forrest Gump"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Filme favoritado",
+            "content": {
+              "application/json": {
+                "example": {
+                  "ok": true,
+                  "favorite": {
+                    "tmdb_movie_id": 13,
+                    "title": "Forrest Gump: O Contador de Histórias",
+                    "poster_url": "https://image.tmdb.org/t/p/w500/d74WpIsH8379TIL4wUxDneRCYv2.jpg"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Não autenticado",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": "Faça login para continuar."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/favorites/{tmdb_movie_id}": {
+      "delete": {
+        "tags": [
+          "Favoritos"
+        ],
+        "summary": "Desfavoritar um filme",
+        "parameters": [
+          {
+            "name": "tmdb_movie_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "example": 13
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Filme removido dos favoritos",
+            "content": {
+              "application/json": {
+                "example": {
+                  "ok": true,
+                  "removed": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/comments": {
+      "post": {
+        "tags": [
+          "Comentários"
+        ],
+        "summary": "Criar comentário em um filme",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "tmdb_movie_id",
+                  "texto"
+                ],
+                "properties": {
+                  "tmdb_movie_id": {
+                    "type": "integer",
+                    "example": 13
+                  },
+                  "texto": {
+                    "type": "string",
+                    "example": "Excelente filme!"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Comentário publicado",
+            "content": {
+              "application/json": {
+                "example": {
+                  "ok": true,
+                  "comment": {
+                    "id": 5,
+                    "tmdb_movie_id": 13,
+                    "texto": "Excelente filme!"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/comments/{comment_id}": {
+      "delete": {
+        "tags": [
+          "Comentários"
+        ],
+        "summary": "Apagar comentário (Próprio usuário ou Moderação Admin)",
+        "parameters": [
+          {
+            "name": "comment_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "example": 5
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Comentário removido",
+            "content": {
+              "application/json": {
+                "example": {
+                  "ok": true,
+                  "deleted": true
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Sem permissão para apagar comentário de outro usuário",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": "Sem permissão para apagar este comentário."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/users": {
+      "get": {
+        "tags": [
+          "Administração & Auditoria"
+        ],
+        "summary": "Listar todos os usuários (Apenas Admin)",
+        "responses": {
+          "200": {
+            "description": "Lista de usuários",
+            "content": {
+              "application/json": {
+                "example": {
+                  "users": [
+                    {
+                      "id": 1,
+                      "nome": "Admin",
+                      "email": "admin@local",
+                      "role": "admin"
+                    },
+                    {
+                      "id": 7,
+                      "nome": "Alice Santos",
+                      "email": "alice@exemplo.com",
+                      "role": "usuario"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Acesso negado para usuários comuns",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": "Acesso negado. Apenas administradores podem executar esta ação."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/users/{target_id}/role": {
+      "post": {
+        "tags": [
+          "Administração & Auditoria"
+        ],
+        "summary": "Alterar papel do usuário (Promover a Admin ou rebaixar) (Apenas Admin)",
+        "parameters": [
+          {
+            "name": "target_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "example": 7
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "role"
+                ],
+                "properties": {
+                  "role": {
+                    "type": "string",
+                    "enum": [
+                      "usuario",
+                      "admin"
+                    ],
+                    "example": "admin"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Papel alterado com sucesso",
+            "content": {
+              "application/json": {
+                "example": {
+                  "ok": true,
+                  "user": {
+                    "id": 7,
+                    "role": "admin"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Acesso negado",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": "Acesso negado."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/logs": {
+      "get": {
+        "tags": [
+          "Administração & Auditoria"
+        ],
+        "summary": "Consultar logs de auditoria no Redis Streams (Apenas Admin)",
+        "parameters": [
+          {
+            "name": "n",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 50
+            },
+            "description": "Quantidade de registros a retornar (máx 500)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Lista dos últimos N logs de auditoria gravados no Redis Streams",
+            "content": {
+              "application/json": {
+                "example": {
+                  "count": 2,
+                  "logs": [
+                    {
+                      "event_id": "1790809193000-0",
+                      "usuario_id": 7,
+                      "acao": "avatar_atualizado",
+                      "detalhe": "key=avatar_7_1790809193.png size=120",
+                      "ip": "172.20.0.1",
+                      "ts_ms": 1790809193000
+                    },
+                    {
+                      "event_id": "1790809190000-0",
+                      "usuario_id": 7,
+                      "acao": "login",
+                      "detalhe": "email=alice@exemplo.com",
+                      "ip": "172.20.0.1",
+                      "ts_ms": 1790809190000
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Acesso negado. A tentativa de acesso é gravada no próprio log.",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": "Acesso negado. Apenas administradores podem executar esta ação."
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
