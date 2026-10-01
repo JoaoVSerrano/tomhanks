@@ -159,9 +159,9 @@ services:
   # Prometheus — Coleta e armazenamento de métricas (Atividade Observabilidade)
   # ─────────────────────────────────────────────────────────────────────────
   prometheus:
-    image: prom/prometheus:latest
-    volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    build:
+      context: .
+      dockerfile: Dockerfile.prometheus
     ports:
       - "9091:9090"
     networks:
@@ -178,16 +178,15 @@ services:
   # Grafana — Visualização e dashboards de observabilidade
   # ─────────────────────────────────────────────────────────────────────────
   grafana:
-    image: grafana/grafana:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.grafana
     ports:
       - "3001:3000"
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
       - GF_USERS_ALLOW_SIGN_UP=false
       - GF_PATHS_PROVISIONING=/etc/grafana/provisioning
-    volumes:
-      - ./grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
     networks:
       - tomhanks-net
     depends_on:
