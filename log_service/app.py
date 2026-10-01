@@ -1,13 +1,14 @@
 from __future__ import annotations
 
-import json
 import os
 import time
 
 import redis
 from flask import Flask, jsonify, request
+from prometheus_flask_exporter import PrometheusMetrics
 
 app = Flask(__name__)
+metrics = PrometheusMetrics(app)
 
 REDIS_URL = os.getenv('REDIS_URL', 'redis://redis:6379/0')
 INTERNAL_TOKEN = os.getenv('INTERNAL_TOKEN', '')
@@ -31,11 +32,6 @@ def require_internal_token():
     if not INTERNAL_TOKEN or token != INTERNAL_TOKEN:
         return json_error('Acesso não autorizado.', 403)
     return None
-
-
-from prometheus_flask_exporter import PrometheusMetrics
-
-metrics = PrometheusMetrics(app)
 
 
 # ---------------------------------------------------------------------------

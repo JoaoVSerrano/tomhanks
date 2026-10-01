@@ -7,6 +7,7 @@ from typing import Any
 
 import requests
 from flask import Flask, Response, jsonify, request, send_from_directory
+from prometheus_flask_exporter import PrometheusMetrics
 from sqlalchemy import delete, select
 
 from backend.database import session_scope, upgrade_database
@@ -26,11 +27,13 @@ app.config.update(
     SESSION_COOKIE_SAMESITE=os.getenv('SESSION_COOKIE_SAMESITE', 'Lax'),
     SESSION_COOKIE_SECURE=os.getenv('SESSION_COOKIE_SECURE', '0') == '1',
 )
+metrics = PrometheusMetrics(app)
 
 
 # ---------------------------------------------------------------------------
 # Auth-service proxy helpers
 # ---------------------------------------------------------------------------
+
 
 def auth_service_url() -> str:
     return os.getenv('AUTH_SERVICE_URL', 'http://auth-service:3000')
@@ -363,11 +366,6 @@ def initialize_app():
     return None
 
 
-from prometheus_flask_exporter import PrometheusMetrics
-
-metrics = PrometheusMetrics(app)
-
-
 # ---------------------------------------------------------------------------
 # Health & Readiness
 # ---------------------------------------------------------------------------
@@ -608,7 +606,6 @@ def serve_user_avatar(key: str):
     endpoint = raw_endpoint.split('://')[-1] if '://' in raw_endpoint else raw_endpoint
     try:
         client = Minio(endpoint, access_key=access_key, secret_key=secret_key, secure=False)
-        response = client.get_object(bucket_name, key)
         content_type = 'image/png'
         key_lower = key.lower()
         if key_lower.endswith(('.jpg', '.jpeg')):
@@ -618,7 +615,10 @@ def serve_user_avatar(key: str):
         elif key_lower.endswith('.gif'):
             content_type = 'image/gif'
 
-        return Response(response.read(), content_type=content_type)
+        with client.get_object(bucket_name, key) as response:
+            data = response.read()
+
+        return Response(data, content_type=content_type)
     except Exception as exc:
         app.logger.warning('Avatar key=%s não encontrado no MinIO: %s', key, exc)
         return json_error('Avatar não encontrado.', 404)

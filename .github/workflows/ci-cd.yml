@@ -14,6 +14,7 @@ jobs:
   test:
     name: 🧪 CI — Execução de Testes Automatizados
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
       - name: 📥 Checkout do repositório
@@ -40,6 +41,7 @@ jobs:
     needs: test
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
       - name: 📥 Checkout do repositório
@@ -75,6 +77,8 @@ jobs:
           push: true
           tags: ${{ steps.meta-app.outputs.tags }}
           labels: ${{ steps.meta-app.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       # -----------------------------------------------------------------------
       # 2. Build & Push: Auth Service
@@ -96,6 +100,8 @@ jobs:
           push: true
           tags: ${{ steps.meta-auth.outputs.tags }}
           labels: ${{ steps.meta-auth.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       # -----------------------------------------------------------------------
       # 3. Build & Push: Log Service (Auditoria / Redis Streams)
@@ -117,3 +123,5 @@ jobs:
           push: true
           tags: ${{ steps.meta-log.outputs.tags }}
           labels: ${{ steps.meta-log.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

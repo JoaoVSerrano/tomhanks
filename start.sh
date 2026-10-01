@@ -38,6 +38,9 @@ ensure_requirements() {
     check_pkg gunicorn gunicorn
     check_pkg mysql-connector-python mysql-connector-python
     check_pkg requests requests
+    check_pkg minio minio
+    check_pkg PyYAML PyYAML
+    check_pkg prometheus-flask-exporter prometheus-flask-exporter
 
     if [ -z "$missing" ]; then
         return 0
@@ -52,8 +55,10 @@ ensure_requirements
 # Garante a criação do schema no banco de dados antes de iniciar o servidor Web
 "$PYTHON_BIN" -c "from backend.app import app, ensure_schema; app.app_context().push(); ensure_schema()" 2>/dev/null || echo "Aviso: Nao foi possivel rodar ensure_schema antecipadamente, o app tentara na primeira requisicao."
 
-# Executa o Gunicorn (seja como binario standalone no PATH ou como modulo python)
-if command -v gunicorn >/dev/null 2>&1; then
+# Executa o Gunicorn (seja no venv, standalone no PATH ou como modulo python)
+if [ -x "$(dirname "$PYTHON_BIN")/gunicorn" ]; then
+    exec "$(dirname "$PYTHON_BIN")/gunicorn" -b 0.0.0.0:${PORT:-8080} backend.app:app
+elif command -v gunicorn >/dev/null 2>&1; then
     exec gunicorn -b 0.0.0.0:${PORT:-8080} backend.app:app
 else
     exec "$PYTHON_BIN" -m gunicorn -b 0.0.0.0:${PORT:-8080} backend.app:app

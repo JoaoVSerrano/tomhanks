@@ -6,8 +6,10 @@ import smtplib
 from datetime import datetime, timedelta, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from typing import Any
 
 from flask import Flask, jsonify, request, session
+from prometheus_flask_exporter import PrometheusMetrics
 from sqlalchemy import delete, select
 from werkzeug.security import check_password_hash, generate_password_hash
 
@@ -22,6 +24,7 @@ app.config.update(
     SESSION_COOKIE_SAMESITE=os.getenv('SESSION_COOKIE_SAMESITE', 'Lax'),
     SESSION_COOKIE_SECURE=os.getenv('SESSION_COOKIE_SECURE', '0') == '1',
 )
+metrics = PrometheusMetrics(app)
 
 AUTH_PORT = int(os.getenv('AUTH_PORT', '3000'))
 
@@ -220,11 +223,6 @@ def ensure_configured_admin() -> None:
         )
 
 
-from prometheus_flask_exporter import PrometheusMetrics
-
-metrics = PrometheusMetrics(app)
-
-
 # ---------------------------------------------------------------------------
 # Rotas de saúde & Readiness
 # ---------------------------------------------------------------------------
@@ -306,11 +304,9 @@ def login():
     with session_scope() as db:
         user = db.scalar(select(User).where(User.email == email))
         if not user or not check_password_hash(user.senha_hash, senha):
-            log_event('login_falhou', detalhe=f'email={email}')
             return json_error('Credenciais inválidas.', 401)
 
         session['user_id'] = int(user.id)
-        log_event('login', usuario_id=int(user.id), detalhe=f'email={email}')
         return jsonify({'user': serialize_user_dict(user)})
 
 
@@ -320,8 +316,6 @@ def login():
 
 @app.post('/logout')
 def logout():
-    uid = session.get('user_id')
-    log_event('logout', usuario_id=int(uid) if uid is not None else None)
     session.clear()
     return jsonify({'ok': True})
 
