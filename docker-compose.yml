@@ -205,7 +205,7 @@ networks:
     ipam:
       driver: default
       config:
-        - subnet: 10.200.200.0/28
+        - subnet: 10.201.0.0/24
 
 volumes:
   redis-data:
