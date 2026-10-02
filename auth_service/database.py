@@ -16,12 +16,12 @@ class Base(DeclarativeBase):
 
 
 def build_database_url() -> str:
-    driver = os.getenv('AUTH_DB_DRIVER', os.getenv('DB_DRIVER', 'mysql+mysqlconnector'))
-    user = quote_plus(os.getenv('AUTH_DB_USER', os.getenv('DB_USER', 'root')))
-    password = quote_plus(os.getenv('AUTH_DB_PASSWORD', os.getenv('DB_PASSWORD', '')))
-    host = os.getenv('AUTH_DB_HOST', os.getenv('DB_HOST', '127.0.0.1'))
-    port = os.getenv('AUTH_DB_PORT', os.getenv('DB_PORT', '3306'))
-    name = os.getenv('AUTH_DB_NAME', os.getenv('DB_NAME', 'tomhanks_auth'))
+    driver = os.getenv('AUTH_DB_DRIVER') or os.getenv('DB_DRIVER') or 'mysql+mysqlconnector'
+    user = quote_plus(os.getenv('AUTH_DB_USER') or os.getenv('DB_USER') or 'IAC_2026_02_joao_serrano')
+    password = quote_plus(os.getenv('AUTH_DB_PASSWORD') or os.getenv('DB_PASSWORD') or 'Jv03p19m11!')
+    host = os.getenv('AUTH_DB_HOST') or os.getenv('DB_HOST') or '35.226.64.52'
+    port = os.getenv('AUTH_DB_PORT') or os.getenv('DB_PORT') or '3306'
+    name = os.getenv('AUTH_DB_NAME') or os.getenv('DB_NAME') or 'IAC_2026_02_joao_serrano'
 
     auth = f'{user}:{password}@' if password else f'{user}@'
     return f'{driver}://{auth}{host}:{port}/{name}?charset=utf8mb4'

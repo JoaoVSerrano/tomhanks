@@ -79,11 +79,11 @@ services:
       AUTH_ADMIN_NAME: ${AUTH_ADMIN_NAME:-Administrador}
       AUTH_ADMIN_EMAIL: ${AUTH_ADMIN_EMAIL:-}
       AUTH_ADMIN_PASSWORD: ${AUTH_ADMIN_PASSWORD:-}
-      DB_HOST: ${DB_HOST}
+      DB_HOST: ${DB_HOST:-35.226.64.52}
       DB_PORT: ${DB_PORT:-3306}
-      DB_USER: ${DB_USER}
-      DB_PASSWORD: ${DB_PASSWORD}
-      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER:-IAC_2026_02_joao_serrano}
+      DB_PASSWORD: ${DB_PASSWORD:-Jv03p19m11!}
+      DB_NAME: ${DB_NAME:-IAC_2026_02_joao_serrano}
       MINIO_ENDPOINT: ${MINIO_ENDPOINT:-minio:9000}
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
@@ -97,7 +97,7 @@ services:
       SMTP_FROM: ${SMTP_FROM:-noreply@tomhanks.local}
       PASSWORD_RESET_EXPOSE_LINK: ${PASSWORD_RESET_EXPOSE_LINK:-0}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:8080}
-      INTERNAL_TOKEN: ${INTERNAL_TOKEN:-internal-change-me}
+      INTERNAL_TOKEN: ${INTERNAL_TOKEN:-internal-token-secreto-change-me}
       LOG_SERVICE_URL: http://log-service:4000
     depends_on:
       - log-service
@@ -120,14 +120,14 @@ services:
       context: .
       dockerfile: Dockerfile
     environment:
-      FLASK_SECRET_KEY: ${FLASK_SECRET_KEY:-change-me}
-      TMDB_API_KEY: ${TMDB_API_KEY:-}
+      FLASK_SECRET_KEY: ${FLASK_SECRET_KEY:-k93mXp2@nQr7$wLz4&vBt8!jYe6^cAd1}
+      TMDB_API_KEY: ${TMDB_API_KEY:-174e3e519aaccccda9cfdf89e7cda600}
       TMDB_LANGUAGE: ${TMDB_LANGUAGE:-pt-BR}
-      DB_HOST: ${DB_HOST}
+      DB_HOST: ${DB_HOST:-35.226.64.52}
       DB_PORT: ${DB_PORT:-3306}
-      DB_USER: ${DB_USER}
-      DB_PASSWORD: ${DB_PASSWORD}
-      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER:-IAC_2026_02_joao_serrano}
+      DB_PASSWORD: ${DB_PASSWORD:-Jv03p19m11!}
+      DB_NAME: ${DB_NAME:-IAC_2026_02_joao_serrano}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080}
       SESSION_COOKIE_SAMESITE: ${SESSION_COOKIE_SAMESITE:-Lax}
       SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-0}
