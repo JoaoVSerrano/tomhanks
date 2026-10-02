@@ -13,4 +13,12 @@ COPY auth_service ./auth_service
 
 EXPOSE 3000
 
-CMD ["gunicorn", "-b", "0.0.0.0:3000", "auth_service.app:app"]
+CMD ["gunicorn", \
+     "--bind", "0.0.0.0:3000", \
+     "--workers", "2", \
+     "--threads", "2", \
+     "--timeout", "30", \
+     "--graceful-timeout", "10", \
+     "--max-requests", "1000", \
+     "--max-requests-jitter", "100", \
+     "auth_service.app:app"]

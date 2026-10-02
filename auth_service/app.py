@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import secrets
 import smtplib
+import threading
 from datetime import datetime, timedelta, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -27,6 +28,10 @@ app.config.update(
 metrics = PrometheusMetrics(app)
 
 AUTH_PORT = int(os.getenv('AUTH_PORT', '3000'))
+
+# Protege a inicialização do banco contra chamadas simultâneas de múltiplos workers
+_init_lock = threading.Lock()
+_schema_ready = False
 
 
 def json_error(message: str, status: int = 400):
@@ -114,15 +119,25 @@ def require_internal_token():
 
 @app.before_request
 def initialize():
+    global _schema_ready
     if request.method == 'OPTIONS':
         return None
-    if not getattr(app, '_schema_ready', False):
-        app._schema_ready = True
+    # O healthcheck nunca deve disparar a inicialização do banco —
+    # evita loop: healthcheck falha → tenta migrate → falha → healthcheck ...
+    if request.path == '/health':
+        return None
+    if _schema_ready:
+        return None
+    with _init_lock:
+        # Double-check após adquirir o lock
+        if _schema_ready:
+            return None
         try:
             upgrade_database()
             ensure_configured_admin()
+            _schema_ready = True
         except Exception:
-            app.logger.exception('Falha ao garantir schema do banco.')
+            app.logger.exception('Falha ao garantir schema do banco — serviço continua, tentará novamente na próxima requisição.')
     return None
 
 
@@ -244,9 +259,12 @@ def health():
             client.list_buckets()
             minio_ok = True
     except Exception as exc:
-        app.logger.error('MinIO indisponível em healthcheck: %s', exc)
+        app.logger.warning('MinIO indisponível em healthcheck (não crítico): %s', exc)
 
-    healthy = database_ok and minio_ok
+    # O serviço é considerado saudável se o banco estiver OK.
+    # MinIO indisponível é degradado mas não fatal — evita restart loop
+    # quando o MinIO ainda não subiu ou está temporariamente inacessível.
+    healthy = database_ok
     payload = {
         'status': 'healthy' if healthy else 'unhealthy',
         'service': 'auth-service',
