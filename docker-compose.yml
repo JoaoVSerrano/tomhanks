@@ -26,7 +26,8 @@ services:
       dockerfile: Dockerfile.log
     environment:
       REDIS_URL: redis://redis:6379/0
-      INTERNAL_TOKEN: ${INTERNAL_TOKEN:-internal-change-me}
+      # Segredo obrigatório — defina na seção *Environment* da stack no Portainer
+      INTERNAL_TOKEN: ${INTERNAL_TOKEN:?defina INTERNAL_TOKEN nas variáveis da stack}
       LOG_PORT: 4000
       MAX_LOG_ENTRIES: 10000
     depends_on:
@@ -49,8 +50,9 @@ services:
     user: "0:0"
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      # Segredos obrigatórios — defina na seção *Environment* da stack no Portainer
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?defina MINIO_ROOT_USER nas variáveis da stack}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?defina MINIO_ROOT_PASSWORD nas variáveis da stack}
     volumes:
       - minio-data:/data
     expose:
@@ -74,21 +76,25 @@ services:
       context: .
       dockerfile: Dockerfile.auth
     environment:
-      AUTH_SECRET_KEY: ${AUTH_SECRET_KEY:-auth-change-me}
+      # Segredos obrigatórios — defina na seção *Environment* da stack no Portainer
+      AUTH_SECRET_KEY: ${AUTH_SECRET_KEY:?defina AUTH_SECRET_KEY nas variáveis da stack}
       AUTH_PORT: 3000
       AUTH_ADMIN_NAME: ${AUTH_ADMIN_NAME:-Administrador}
       AUTH_ADMIN_EMAIL: ${AUTH_ADMIN_EMAIL:-}
       AUTH_ADMIN_PASSWORD: ${AUTH_ADMIN_PASSWORD:-}
-      DB_HOST: ${DB_HOST:-35.226.64.52}
-      DB_PORT: ${DB_PORT:-3306}
-      DB_USER: ${DB_USER:-IAC_2026_02_joao_serrano}
-      DB_PASSWORD: ${DB_PASSWORD:-Jv03p19m11!}
-      DB_NAME: ${DB_NAME:-IAC_2026_02_joao_serrano}
+      # Banco remoto — obrigatório, sem fallback
+      DB_HOST: ${DB_HOST:?defina DB_HOST nas variáveis da stack}
+      DB_PORT: ${DB_PORT:?defina DB_PORT nas variáveis da stack}
+      DB_USER: ${DB_USER:?defina DB_USER nas variáveis da stack}
+      DB_PASSWORD: ${DB_PASSWORD:?defina DB_PASSWORD nas variáveis da stack}
+      DB_NAME: ${DB_NAME:?defina DB_NAME nas variáveis da stack}
+      # MinIO — obrigatório
       MINIO_ENDPOINT: ${MINIO_ENDPOINT:-minio:9000}
-      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
-      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:?defina MINIO_ACCESS_KEY nas variáveis da stack}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:?defina MINIO_SECRET_KEY nas variáveis da stack}
       MINIO_BUCKET_NAME: ${MINIO_BUCKET_NAME:-tomhanks-avatars}
       MINIO_PUBLIC_URL: ${MINIO_PUBLIC_URL:-http://localhost:9000/tomhanks-avatars}
+      # SMTP — opcional (sem SMTP, recuperação de senha não envia e-mail)
       SMTP_HOST: ${SMTP_HOST:-sandbox.smtp.mailtrap.io}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_ENCRYPTION: ${SMTP_ENCRYPTION:-starttls}
@@ -97,7 +103,7 @@ services:
       SMTP_FROM: ${SMTP_FROM:-noreply@tomhanks.local}
       PASSWORD_RESET_EXPOSE_LINK: ${PASSWORD_RESET_EXPOSE_LINK:-0}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:8080}
-      INTERNAL_TOKEN: ${INTERNAL_TOKEN:-internal-token-secreto-change-me}
+      INTERNAL_TOKEN: ${INTERNAL_TOKEN:?defina INTERNAL_TOKEN nas variáveis da stack}
       LOG_SERVICE_URL: http://log-service:4000
     depends_on:
       - log-service
@@ -120,25 +126,28 @@ services:
       context: .
       dockerfile: Dockerfile
     environment:
-      FLASK_SECRET_KEY: ${FLASK_SECRET_KEY:-k93mXp2@nQr7$wLz4&vBt8!jYe6^cAd1}
-      TMDB_API_KEY: ${TMDB_API_KEY:-174e3e519aaccccda9cfdf89e7cda600}
+      # Segredos obrigatórios — defina na seção *Environment* da stack no Portainer
+      FLASK_SECRET_KEY: ${FLASK_SECRET_KEY:?defina FLASK_SECRET_KEY nas variáveis da stack}
+      TMDB_API_KEY: ${TMDB_API_KEY:-}
       TMDB_LANGUAGE: ${TMDB_LANGUAGE:-pt-BR}
-      DB_HOST: ${DB_HOST:-35.226.64.52}
-      DB_PORT: ${DB_PORT:-3306}
-      DB_USER: ${DB_USER:-IAC_2026_02_joao_serrano}
-      DB_PASSWORD: ${DB_PASSWORD:-Jv03p19m11!}
-      DB_NAME: ${DB_NAME:-IAC_2026_02_joao_serrano}
+      # Banco remoto — obrigatório, sem fallback
+      DB_HOST: ${DB_HOST:?defina DB_HOST nas variáveis da stack}
+      DB_PORT: ${DB_PORT:?defina DB_PORT nas variáveis da stack}
+      DB_USER: ${DB_USER:?defina DB_USER nas variáveis da stack}
+      DB_PASSWORD: ${DB_PASSWORD:?defina DB_PASSWORD nas variáveis da stack}
+      DB_NAME: ${DB_NAME:?defina DB_NAME nas variáveis da stack}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080}
       SESSION_COOKIE_SAMESITE: ${SESSION_COOKIE_SAMESITE:-Lax}
       SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-0}
       PORT: ${PORT:-8080}
+      # MinIO — obrigatório
       MINIO_ENDPOINT: ${MINIO_ENDPOINT:-minio:9000}
-      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
-      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:?defina MINIO_ACCESS_KEY nas variáveis da stack}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:?defina MINIO_SECRET_KEY nas variáveis da stack}
       MINIO_BUCKET_NAME: ${MINIO_BUCKET_NAME:-tomhanks-avatars}
       MINIO_PUBLIC_URL: ${MINIO_PUBLIC_URL:-http://localhost:9000/tomhanks-avatars}
       AUTH_SERVICE_URL: http://auth-service:3000
-      INTERNAL_TOKEN: ${INTERNAL_TOKEN:-internal-change-me}
+      INTERNAL_TOKEN: ${INTERNAL_TOKEN:?defina INTERNAL_TOKEN nas variáveis da stack}
       LOG_SERVICE_URL: http://log-service:4000
     ports:
       - "${PORT:-8080}:${PORT:-8080}"

@@ -19,7 +19,16 @@ from auth_service.models import ResetToken, User
 
 
 app = Flask(__name__)
-app.secret_key = os.getenv('AUTH_SECRET_KEY', 'auth-dev-secret-change-me')
+_auth_secret = os.getenv('AUTH_SECRET_KEY')
+if not _auth_secret:
+    import sys
+    print(
+        '[auth_service] ERRO: variável AUTH_SECRET_KEY não definida. '
+        'Defina-a na seção *Environment* da stack no Portainer.',
+        file=sys.stderr,
+    )
+    sys.exit(1)
+app.secret_key = _auth_secret
 app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE=os.getenv('SESSION_COOKIE_SAMESITE', 'Lax'),
@@ -238,6 +247,7 @@ def ensure_configured_admin() -> None:
         )
 
 
+
 # ---------------------------------------------------------------------------
 # Rotas de saúde & Readiness
 # ---------------------------------------------------------------------------
@@ -382,8 +392,12 @@ def get_user_internal(user_id: int):
 def get_minio_client():
     from minio import Minio
     raw_endpoint = os.getenv('MINIO_ENDPOINT', 'minio:9000')
-    access_key = os.getenv('MINIO_ACCESS_KEY', 'minioadmin')
-    secret_key = os.getenv('MINIO_SECRET_KEY', 'minioadmin')
+    access_key = os.getenv('MINIO_ACCESS_KEY', '')
+    secret_key = os.getenv('MINIO_SECRET_KEY', '')
+
+    if not access_key or not secret_key:
+        app.logger.warning('MINIO_ACCESS_KEY ou MINIO_SECRET_KEY não definidos — MinIO desabilitado.')
+        return None
 
     endpoint = raw_endpoint.split('://')[-1] if '://' in raw_endpoint else raw_endpoint
     try:

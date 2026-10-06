@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import os
+import sys
 from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import quote_plus
 
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 
@@ -15,17 +16,64 @@ class Base(DeclarativeBase):
     pass
 
 
+# ---------------------------------------------------------------------------
+# Variáveis obrigatórias — falha na inicialização se ausentes
+# ---------------------------------------------------------------------------
+
+_REQUIRED = {
+    'DB_HOST': 'Host do banco de dados MariaDB',
+    'DB_USER': 'Usuário do banco de dados',
+    'DB_PASSWORD': 'Senha do banco de dados',
+    'DB_NAME': 'Nome do banco de dados',
+}
+
+# Aliases AUTH_DB_* têm prioridade; se não definidos, cai em DB_*
+_ALIASES = {
+    'DB_HOST': 'AUTH_DB_HOST',
+    'DB_USER': 'AUTH_DB_USER',
+    'DB_PASSWORD': 'AUTH_DB_PASSWORD',
+    'DB_NAME': 'AUTH_DB_NAME',
+}
+
+
+def _resolve(key: str) -> str | None:
+    """Retorna o valor de AUTH_DB_KEY ou DB_KEY, nessa ordem."""
+    return os.getenv(_ALIASES.get(key, key)) or os.getenv(key)
+
+
+def _check_required_env() -> None:
+    """Aborta a inicialização se variáveis obrigatórias estiverem ausentes.
+
+    Lista TODAS as variáveis faltantes antes de encerrar, sem imprimir valores.
+    """
+    missing = []
+    for var, desc in _REQUIRED.items():
+        alias = _ALIASES.get(var, var)
+        if not _resolve(var):
+            missing.append(f'  • {alias} ou {var} — {desc}')
+    if missing:
+        print(
+            '[auth_service/database] ERRO: variáveis de ambiente obrigatórias não definidas:\n'
+            + '\n'.join(missing)
+            + '\n\nDefina-as nas variáveis de ambiente do container (seção *Environment* da stack no Portainer).',
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+
 def build_database_url() -> str:
-    driver = os.getenv('AUTH_DB_DRIVER') or os.getenv('DB_DRIVER') or 'mysql+mysqlconnector'
-    user = quote_plus(os.getenv('AUTH_DB_USER') or os.getenv('DB_USER') or 'IAC_2026_02_joao_serrano')
-    password = quote_plus(os.getenv('AUTH_DB_PASSWORD') or os.getenv('DB_PASSWORD') or 'Jv03p19m11!')
-    host = os.getenv('AUTH_DB_HOST') or os.getenv('DB_HOST') or '35.226.64.52'
-    port = os.getenv('AUTH_DB_PORT') or os.getenv('DB_PORT') or '3306'
-    name = os.getenv('AUTH_DB_NAME') or os.getenv('DB_NAME') or 'IAC_2026_02_joao_serrano'
+    driver = _resolve('DB_DRIVER') or 'mysql+mysqlconnector'
+    user = quote_plus(_resolve('DB_USER'))         # type: ignore[arg-type]
+    password = quote_plus(_resolve('DB_PASSWORD'))  # type: ignore[arg-type]
+    host = _resolve('DB_HOST')
+    port = _resolve('DB_PORT') or os.getenv('DB_PORT') or '3306'
+    name = _resolve('DB_NAME')
 
-    auth = f'{user}:{password}@' if password else f'{user}@'
-    return f'{driver}://{auth}{host}:{port}/{name}?charset=utf8mb4'
+    return f'{driver}://{user}:{password}@{host}:{port}/{name}?charset=utf8mb4'
 
+
+# Validação executada no momento da importação do módulo
+_check_required_env()
 
 engine = create_engine(
     build_database_url(),
@@ -43,8 +91,6 @@ def alembic_config_path() -> Path:
     return Path(__file__).resolve().parent.parent / 'alembic-auth.ini'
 
 
-from sqlalchemy import create_engine, text
-
 def upgrade_database() -> None:
     config = Config(str(alembic_config_path()))
     config.set_main_option('sqlalchemy.url', build_database_url().replace('%', '%%'))
@@ -55,11 +101,11 @@ def upgrade_database() -> None:
     Base.metadata.create_all(bind=engine)
     with engine.begin() as conn:
         try:
-            conn.execute(text("ALTER TABLE usuarios ADD COLUMN bio TEXT NULL"))
+            conn.execute(text('ALTER TABLE usuarios ADD COLUMN bio TEXT NULL'))
         except Exception:
             pass
         try:
-            conn.execute(text("ALTER TABLE usuarios ADD COLUMN avatar_key VARCHAR(255) NULL"))
+            conn.execute(text('ALTER TABLE usuarios ADD COLUMN avatar_key VARCHAR(255) NULL'))
         except Exception:
             pass
 

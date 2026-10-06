@@ -21,7 +21,16 @@ TMDB_IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w500'
 _LAST_KNOWN_CATALOG: list[dict[str, Any]] = []
 
 app = Flask(__name__)
-app.secret_key = os.getenv('FLASK_SECRET_KEY', 'dev-secret-change-me')
+_flask_secret = os.getenv('FLASK_SECRET_KEY')
+if not _flask_secret:
+    import sys
+    print(
+        '[backend] ERRO: variável FLASK_SECRET_KEY não definida. '
+        'Defina-a na seção *Environment* da stack no Portainer.',
+        file=sys.stderr,
+    )
+    sys.exit(1)
+app.secret_key = _flask_secret
 app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE=os.getenv('SESSION_COOKIE_SAMESITE', 'Lax'),
@@ -50,10 +59,15 @@ def minio_is_ready() -> bool:
 
         raw_endpoint = os.getenv('MINIO_ENDPOINT', 'minio:9000')
         endpoint = raw_endpoint.split('://')[-1] if '://' in raw_endpoint else raw_endpoint
+        access_key = os.getenv('MINIO_ACCESS_KEY', '')
+        secret_key = os.getenv('MINIO_SECRET_KEY', '')
+        if not access_key or not secret_key:
+            app.logger.warning('MINIO_ACCESS_KEY ou MINIO_SECRET_KEY não definidos — MinIO desabilitado.')
+            return False
         client = Minio(
             endpoint,
-            access_key=os.getenv('MINIO_ACCESS_KEY', 'minioadmin'),
-            secret_key=os.getenv('MINIO_SECRET_KEY', 'minioadmin'),
+            access_key=access_key,
+            secret_key=secret_key,
             secure=False,
         )
         client.list_buckets()
@@ -599,9 +613,12 @@ def serve_user_avatar(key: str):
     """Serve a imagem de avatar do MinIO diretamente aos clientes."""
     from minio import Minio
     raw_endpoint = os.getenv('MINIO_ENDPOINT', 'minio:9000')
-    access_key = os.getenv('MINIO_ACCESS_KEY', 'minioadmin')
-    secret_key = os.getenv('MINIO_SECRET_KEY', 'minioadmin')
+    access_key = os.getenv('MINIO_ACCESS_KEY', '')
+    secret_key = os.getenv('MINIO_SECRET_KEY', '')
     bucket_name = os.getenv('MINIO_BUCKET_NAME', 'tomhanks-avatars')
+
+    if not access_key or not secret_key:
+        return json_error('Serviço de armazenamento não configurado.', 503)
 
     endpoint = raw_endpoint.split('://')[-1] if '://' in raw_endpoint else raw_endpoint
     try:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import quote_plus
@@ -15,17 +16,47 @@ class Base(DeclarativeBase):
     pass
 
 
+# ---------------------------------------------------------------------------
+# Variáveis obrigatórias — falha na inicialização se ausentes
+# ---------------------------------------------------------------------------
+
+_REQUIRED = {
+    'DB_HOST': 'Host do banco de dados MariaDB',
+    'DB_USER': 'Usuário do banco de dados',
+    'DB_PASSWORD': 'Senha do banco de dados',
+    'DB_NAME': 'Nome do banco de dados',
+}
+
+
+def _check_required_env() -> None:
+    """Aborta a inicialização se variáveis obrigatórias estiverem ausentes.
+
+    Lista TODAS as variáveis faltantes antes de encerrar, sem imprimir valores.
+    """
+    missing = [f'  • {var} — {desc}' for var, desc in _REQUIRED.items() if not os.getenv(var)]
+    if missing:
+        print(
+            '[database] ERRO: variáveis de ambiente obrigatórias não definidas:\n'
+            + '\n'.join(missing)
+            + '\n\nDefina-as nas variáveis de ambiente do container (seção *Environment* da stack no Portainer).',
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+
 def build_database_url() -> str:
     driver = os.getenv('DB_DRIVER') or 'mysql+mysqlconnector'
-    user = quote_plus(os.getenv('DB_USER') or 'IAC_2026_02_joao_serrano')
-    password = quote_plus(os.getenv('DB_PASSWORD') or 'Jv03p19m11!')
-    host = os.getenv('DB_HOST') or '35.226.64.52'
+    user = quote_plus(os.environ['DB_USER'])
+    password = quote_plus(os.environ['DB_PASSWORD'])
+    host = os.environ['DB_HOST']
     port = os.getenv('DB_PORT') or '3306'
-    name = os.getenv('DB_NAME') or 'IAC_2026_02_joao_serrano'
+    name = os.environ['DB_NAME']
 
-    auth = f'{user}:{password}@' if password else f'{user}@'
-    return f'{driver}://{auth}{host}:{port}/{name}?charset=utf8mb4'
+    return f'{driver}://{user}:{password}@{host}:{port}/{name}?charset=utf8mb4'
 
+
+# Validação executada no momento da importação do módulo
+_check_required_env()
 
 engine = create_engine(
     build_database_url(),
