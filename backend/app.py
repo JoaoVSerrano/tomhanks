@@ -659,10 +659,54 @@ def openapi_yaml():
     return Response(get_openapi_yaml(), content_type='text/yaml; charset=utf-8')
 
 
+@app.get('/api/docs/auth/openapi.json')
+def auth_openapi_json():
+    """Proxy para a especificação OpenAPI 3.0 do auth-service."""
+    try:
+        resp = requests.get(f'{auth_service_url()}/api/docs/openapi.json', timeout=2)
+        if resp.status_code == 200:
+            return Response(resp.content, content_type='application/json; charset=utf-8')
+    except Exception as exc:
+        app.logger.warning('Falha ao obter especificação OpenAPI do auth-service: %s', exc)
+
+    fallback = {
+        "openapi": "3.0.3",
+        "info": {
+            "title": "auth-service (Indisponível)",
+            "description": "O microsserviço de autenticação está temporariamente inacessível na rede Docker.",
+            "version": "1.0.0"
+        },
+        "paths": {}
+    }
+    return jsonify(fallback)
+
+
+@app.get('/api/docs/log/openapi.json')
+def log_openapi_json():
+    """Proxy para a especificação OpenAPI 3.0 do log-service."""
+    try:
+        resp = requests.get(f'{log_service_url()}/api/docs/openapi.json', timeout=2)
+        if resp.status_code == 200:
+            return Response(resp.content, content_type='application/json; charset=utf-8')
+    except Exception as exc:
+        app.logger.warning('Falha ao obter especificação OpenAPI do log-service: %s', exc)
+
+    fallback = {
+        "openapi": "3.0.3",
+        "info": {
+            "title": "log-service (Indisponível)",
+            "description": "O microsserviço de auditoria (log-service) está temporariamente inacessível na rede Docker.",
+            "version": "1.0.0"
+        },
+        "paths": {}
+    }
+    return jsonify(fallback)
+
+
 @app.get('/apidocs')
 @app.get('/docs')
 def swagger_ui():
-    """Renderiza a interface interativa do Swagger UI integrada à aplicação."""
+    """Renderiza a interface interativa do Swagger UI integrada à aplicação com seletor de serviços."""
     html_content = """<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -670,7 +714,7 @@ def swagger_ui():
   <title>Documentação Swagger / OpenAPI — Catálogo Tom Hanks</title>
   <link rel="stylesheet" type="text/css" href="https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/5.11.0/swagger-ui.min.css" />
   <style>
-    html { box-sizing: border-box; overflow: -moz-scrollbars-vertical; overflow-y: scroll; }
+    html { box-sizing: border-box; overflow-y: scroll; }
     *, *:before, *:after { box-sizing: inherit; }
     body { margin:0; background: #0f172a; color: #f8fafc; font-family: sans-serif; }
     .swagger-ui .topbar { background-color: #1e293b; border-bottom: 2px solid #e94560; }
@@ -684,7 +728,12 @@ def swagger_ui():
   <script>
     window.onload = function() {
       const ui = SwaggerUIBundle({
-        url: "/api/docs/openapi.json",
+        urls: [
+          { url: "/api/docs/openapi.json", name: "Catálogo (Gateway)" },
+          { url: "/api/docs/auth/openapi.json", name: "auth-service" },
+          { url: "/api/docs/log/openapi.json", name: "log-service" }
+        ],
+        "urls.primaryName": "Catálogo (Gateway)",
         dom_id: '#swagger-ui',
         deepLinking: true,
         presets: [

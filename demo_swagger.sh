@@ -56,8 +56,15 @@ TAGS=$(echo "$OPENAPI_JSON" | jq -r '.tags[].name' | paste -sd ", " -)
 
 echo "  📌 Especificação OpenAPI Versão: $VERSION"
 echo "  📌 Título da Documentação: $TITLE"
-echo "  📌 Total de Endpoints Documentados: $PATHS_COUNT"
+echo "  📌 Total de Endpoints Documentados (Gateway): $PATHS_COUNT"
 echo "  📌 Tags/Categorias: $TAGS"
+
+echo ""
+echo "  🔍 Testando endpoints agregadores de documentação dos microsserviços internos:"
+AUTH_DOCS_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/api/docs/auth/openapi.json" 2>/dev/null || echo "000")
+echo "  → GET $BASE/api/docs/auth/openapi.json Status: $AUTH_DOCS_STATUS (auth-service)"
+LOG_DOCS_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/api/docs/log/openapi.json" 2>/dev/null || echo "000")
+echo "  → GET $BASE/api/docs/log/openapi.json Status: $LOG_DOCS_STATUS (log-service)"
 
 echo ""
 echo "=========================================================="

@@ -24,8 +24,8 @@ OPENAPI_SPEC: dict[str, Any] = {
     },
     "servers": [
         {
-            "url": "http://localhost:8080",
-            "description": "Servidor Local / Gateway da Aplicação"
+            "url": "/",
+            "description": "Gateway da Aplicação"
         }
     ],
     "tags": [
@@ -38,6 +38,31 @@ OPENAPI_SPEC: dict[str, Any] = {
         {"name": "Administração & Auditoria", "description": "Gestão de papéis e logs de auditoria no Redis Streams"}
     ],
     "paths": {
+        "/health": {
+            "get": {
+                "tags": ["Health"],
+                "summary": "Healthcheck raiz do sistema",
+                "description": "Verifica se a aplicação Flask e suas dependências estão funcionando corretamente.",
+                "responses": {
+                    "200": {
+                        "description": "Sistema operando normalmente",
+                        "content": {
+                            "application/json": {
+                                "example": {"status": "healthy"}
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Dependência degradada",
+                        "content": {
+                            "application/json": {
+                                "example": {"status": "unhealthy"}
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/health": {
             "get": {
                 "tags": ["Health"],
@@ -262,6 +287,49 @@ OPENAPI_SPEC: dict[str, Any] = {
                 }
             }
         },
+        "/api/auth/reset-password": {
+            "post": {
+                "tags": ["Autenticação"],
+                "summary": "Redefinir senha com token",
+                "requestBody": {
+                    "required": True,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "required": ["token", "nova_senha"],
+                                "properties": {
+                                    "token": {"type": "string"},
+                                    "nova_senha": {"type": "string"}
+                                }
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {"description": "Senha redefinida com sucesso"},
+                    "400": {"description": "Token inválido ou expirado"}
+                }
+            }
+        },
+        "/api/auth/reset-password/check": {
+            "get": {
+                "tags": ["Autenticação"],
+                "summary": "Verificar validade do token de reset",
+                "parameters": [
+                    {
+                        "name": "token",
+                        "in": "query",
+                        "required": True,
+                        "schema": {"type": "string"}
+                    }
+                ],
+                "responses": {
+                    "200": {"description": "Token válido"},
+                    "400": {"description": "Token inválido ou expirado"}
+                }
+            }
+        },
         "/api/profile/{user_id}": {
             "get": {
                 "tags": ["Perfil & Upload"],
@@ -452,6 +520,25 @@ OPENAPI_SPEC: dict[str, Any] = {
             }
         },
         "/api/favorites": {
+            "get": {
+                "tags": ["Favoritos"],
+                "summary": "Listar filmes favoritados pelo usuário logado",
+                "responses": {
+                    "200": {
+                        "description": "Lista de filmes favoritos",
+                        "content": {
+                            "application/json": {
+                                "example": {
+                                    "favorites": [
+                                        {"id": 1, "tmdb_movie_id": 13, "titulo": "Forrest Gump"}
+                                    ]
+                                }
+                            }
+                        }
+                    },
+                    "401": {"description": "Não autenticado"}
+                }
+            },
             "post": {
                 "tags": ["Favoritos"],
                 "summary": "Favoritar um filme",
@@ -493,13 +580,13 @@ OPENAPI_SPEC: dict[str, Any] = {
                 }
             }
         },
-        "/api/favorites/{tmdb_movie_id}": {
+        "/api/favorites/{movie_id}": {
             "delete": {
                 "tags": ["Favoritos"],
                 "summary": "Desfavoritar um filme",
                 "parameters": [
                     {
-                        "name": "tmdb_movie_id",
+                        "name": "movie_id",
                         "in": "path",
                         "required": True,
                         "schema": {"type": "integer"},
@@ -515,6 +602,34 @@ OPENAPI_SPEC: dict[str, Any] = {
             }
         },
         "/api/comments": {
+            "get": {
+                "tags": ["Comentários"],
+                "summary": "Listar comentários do usuário ou filtrados por filme",
+                "parameters": [
+                    {
+                        "name": "movie_id",
+                        "in": "query",
+                        "required": False,
+                        "schema": {"type": "integer"},
+                        "description": "ID do filme para filtrar comentários"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Lista de comentários",
+                        "content": {
+                            "application/json": {
+                                "example": {
+                                    "comments": [
+                                        {"id": 1, "tmdb_movie_id": 13, "texto": "Excelente filme!", "criado_em": "2026-09-30T22:00:00"}
+                                    ]
+                                }
+                            }
+                        }
+                    },
+                    "401": {"description": "Não autenticado"}
+                }
+            },
             "post": {
                 "tags": ["Comentários"],
                 "summary": "Criar comentário em um filme",

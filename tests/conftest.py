@@ -24,3 +24,13 @@ _DEFAULT_TEST_ENV = {
 
 for _key, _value in _DEFAULT_TEST_ENV.items():
     os.environ.setdefault(_key, _value)
+
+import pytest
+
+
+@pytest.fixture
+def client():
+    from backend.app import app
+    app.config['TESTING'] = True
+    with app.test_client() as c:
+        yield c

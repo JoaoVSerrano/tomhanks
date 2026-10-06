@@ -35,6 +35,67 @@ def require_internal_token():
 
 
 # ---------------------------------------------------------------------------
+# Documentação Swagger / OpenAPI 3.0 — log-service
+# ---------------------------------------------------------------------------
+
+@app.get('/api/docs/openapi.json')
+def openapi_json():
+    """Retorna a especificação OpenAPI 3.0 do log-service em JSON."""
+    from flask import Response
+    from log_service.swagger_spec import get_openapi_json
+    return Response(get_openapi_json(), content_type='application/json; charset=utf-8')
+
+
+@app.get('/api/docs/openapi.yaml')
+def openapi_yaml():
+    """Retorna a especificação OpenAPI 3.0 do log-service em YAML."""
+    from flask import Response
+    from log_service.swagger_spec import get_openapi_yaml
+    return Response(get_openapi_yaml(), content_type='text/yaml; charset=utf-8')
+
+
+@app.get('/apidocs')
+@app.get('/docs')
+def swagger_ui():
+    """Renderiza o Swagger UI para o log-service."""
+    from flask import Response
+    html_content = """<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>log-service — Documentação OpenAPI</title>
+  <link rel="stylesheet" type="text/css" href="https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/5.11.0/swagger-ui.min.css" />
+  <style>
+    html { box-sizing: border-box; overflow-y: scroll; }
+    *, *:before, *:after { box-sizing: inherit; }
+    body { margin:0; background: #0f172a; color: #f8fafc; font-family: sans-serif; }
+    .swagger-ui .topbar { background-color: #1e293b; border-bottom: 2px solid #e94560; }
+    .swagger-ui .info .title { color: #f8fafc; }
+  </style>
+</head>
+<body>
+  <div id="swagger-ui"></div>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/5.11.0/swagger-ui-bundle.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/5.11.0/swagger-ui-standalone-preset.min.js"></script>
+  <script>
+    window.onload = function() {
+      const ui = SwaggerUIBundle({
+        url: "/api/docs/openapi.json",
+        dom_id: '#swagger-ui',
+        deepLinking: true,
+        presets: [SwaggerUIBundle.presets.apis, SwaggerUIStandalonePreset],
+        plugins: [SwaggerUIBundle.plugins.DownloadUrl],
+        layout: "StandaloneLayout"
+      });
+      window.ui = ui;
+    };
+  </script>
+</body>
+</html>"""
+    return Response(html_content, content_type='text/html; charset=utf-8')
+
+
+# ---------------------------------------------------------------------------
 # Health & Readiness
 # ---------------------------------------------------------------------------
 
