@@ -15,6 +15,18 @@ jobs:
     name: 🧪 CI — Execução de Testes Automatizados
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      DB_HOST: localhost
+      DB_PORT: "3306"
+      DB_USER: test_user
+      DB_PASSWORD: test_password
+      DB_NAME: test_db
+      FLASK_SECRET_KEY: test-flask-secret-key-ci-environment
+      AUTH_SECRET_KEY: test-auth-secret-key-ci-environment
+      INTERNAL_TOKEN: test-internal-token-ci-environment
+      MINIO_ACCESS_KEY: test-minio-key
+      MINIO_SECRET_KEY: test-minio-secret
+      REDIS_URL: redis://localhost:6379/0
 
     steps:
       - name: 📥 Checkout do repositório
@@ -26,10 +38,10 @@ jobs:
           python-version: "3.12"
           cache: "pip"
 
-      - name: 📦 Instalar dependências Python
+      - name: 📦 Instalar dependências Python de todos os serviços
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r requirements.txt -r auth_service/requirements.txt -r log_service/requirements.txt
           pip install pytest
 
       - name: 🧪 Executar suíte de testes pytest
@@ -125,3 +137,73 @@ jobs:
           labels: ${{ steps.meta-log.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  deploy:
+    name: 🚀 Deploy — Atualização Contínua no Portainer & Smoke Test
+    needs: build-and-push
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 15
+
+    steps:
+      - name: 🌐 Disparar Webhook do Portainer
+        env:
+          PORTAINER_WEBHOOK_URL: ${{ secrets.PORTAINER_WEBHOOK_URL }}
+        run: |
+          if [ -z "$PORTAINER_WEBHOOK_URL" ]; then
+            echo "::warning::Secret PORTAINER_WEBHOOK_URL não configurado no GitHub. O deploy automático via Portainer foi ignorado."
+            echo "Para habilitar, crie o secret PORTAINER_WEBHOOK_URL com a URL do webhook da stack no Portainer."
+            exit 0
+          fi
+
+          echo "Disparando webhook de atualização da stack no Portainer..."
+          curl --fail --retry 3 --retry-delay 5 -X POST "$PORTAINER_WEBHOOK_URL"
+          echo "✅ Webhook do Portainer acionado com sucesso!"
+
+      - name: 🩺 Smoke Test — Validação de Saúde da Aplicação (/health)
+        env:
+          DEPLOY_HEALTH_URL: ${{ secrets.DEPLOY_HEALTH_URL || vars.DEPLOY_HEALTH_URL }}
+          PORTAINER_WEBHOOK_URL: ${{ secrets.PORTAINER_WEBHOOK_URL }}
+        run: |
+          if [ -z "$PORTAINER_WEBHOOK_URL" ]; then
+            echo "Deploy ignorado por ausência de webhook; smoke test não será executado."
+            exit 0
+          fi
+
+          if [ -z "$DEPLOY_HEALTH_URL" ]; then
+            echo "::warning::URL de healthcheck (DEPLOY_HEALTH_URL) não configurada como secret ou variável. Smoke test ignorado."
+            exit 0
+          fi
+
+          echo "Iniciando smoke test em: $DEPLOY_HEALTH_URL"
+          echo "Aguardando o Portainer concluir o deploy da stack..."
+
+          MAX_ATTEMPTS=30
+          SLEEP_SECONDS=10
+          ATTEMPT=1
+          SUCCESS=0
+
+          while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
+            echo "Tentativa $ATTEMPT/$MAX_ATTEMPTS: consultando $DEPLOY_HEALTH_URL..."
+            HTTP_CODE=$(curl -s -o /tmp/health_response.json -w "%{http_code}" "$DEPLOY_HEALTH_URL" || echo "000")
+
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "✅ Resposta HTTP 200 recebida!"
+              cat /tmp/health_response.json || true
+              echo ""
+              SUCCESS=1
+              break
+            else
+              echo "  Status retornado: $HTTP_CODE. Aguardando ${SLEEP_SECONDS}s..."
+              sleep $SLEEP_SECONDS
+            fi
+            ATTEMPT=$((ATTEMPT + 1))
+          done
+
+          if [ $SUCCESS -ne 1 ]; then
+            echo "❌ ERRO: Aplicação não atingiu o estado saudável dentro do tempo limite (${MAX_ATTEMPTS}x${SLEEP_SECONDS}s)."
+            exit 1
+          fi
+
+          echo "🎉 Smoke test concluído com sucesso! Deploy verificado em produção."
