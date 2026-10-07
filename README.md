@@ -4,6 +4,10 @@
 > Faculdade de Tecnologia de Pompeia (Fatec Pompeia)  
 > Professor: [@siriani](https://github.com/siriani)
 
+## 📄 Documento
+
+- [P1 ISW055 — João Serrano (assinado)](docs/P1_ISW055_Joao_Serrano_assinado.pdf)
+
 ---
 
 ## 📌 Visão Geral do Projeto
