@@ -20,6 +20,12 @@ _DEFAULT_TEST_ENV = {
     'MINIO_ACCESS_KEY': 'test-minio-key',
     'MINIO_SECRET_KEY': 'test-minio-secret',
     'REDIS_URL': 'redis://localhost:6379/0',
+    'STRIPE_SECRET_KEY': 'sk_test_fake_key_12345',
+    'STRIPE_WEBHOOK_SECRET': 'whsec_fake_secret_12345',
+    'STRIPE_PRICE_ID': 'price_fake_12345',
+    'STRIPE_PUBLISHABLE_KEY': 'pk_test_fake_12345',
+    'GOOGLE_CLIENT_ID': 'fake-client-id.apps.googleusercontent.com',
+    'GOOGLE_CLIENT_SECRET': 'fake-client-secret',
 }
 
 for _key, _value in _DEFAULT_TEST_ENV.items():
