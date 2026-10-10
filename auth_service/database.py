@@ -108,6 +108,18 @@ def upgrade_database() -> None:
             conn.execute(text('ALTER TABLE usuarios ADD COLUMN avatar_key VARCHAR(255) NULL'))
         except Exception:
             pass
+        try:
+            conn.execute(text('ALTER TABLE usuarios MODIFY COLUMN senha_hash VARCHAR(255) NULL'))
+        except Exception:
+            pass
+        try:
+            conn.execute(text('ALTER TABLE usuarios ADD COLUMN google_id VARCHAR(255) NULL'))
+        except Exception:
+            pass
+        try:
+            conn.execute(text('CREATE UNIQUE INDEX ix_usuarios_google_id ON usuarios (google_id)'))
+        except Exception:
+            pass
 
 
 @contextmanager

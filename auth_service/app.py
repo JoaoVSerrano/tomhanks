@@ -486,6 +486,7 @@ def serialize_user_dict(user: User) -> dict[str, Any]:
         'bio': getattr(user, 'bio', '') or '',
         'avatar_key': getattr(user, 'avatar_key', None),
         'avatar_url': avatar_url,
+        'google_id': getattr(user, 'google_id', None),
         'criado_em': user.criado_em.isoformat() if hasattr(user.criado_em, 'isoformat') else str(user.criado_em) if user.criado_em else None,
     }
 
@@ -855,7 +856,129 @@ def check_reset_token():
         if token.usado or now > expira_em:
             return json_error('Token expirado ou já utilizado.', 400)
 
-        return jsonify({'ok': True, 'expira_em': expira_em.isoformat()})
+# ---------------------------------------------------------------------------
+# Google OAuth
+# ---------------------------------------------------------------------------
+
+GOOGLE_CLIENT_ID = os.getenv('GOOGLE_CLIENT_ID', '')
+GOOGLE_CLIENT_SECRET = os.getenv('GOOGLE_CLIENT_SECRET', '')
+GOOGLE_REDIRECT_URI = os.getenv('GOOGLE_REDIRECT_URI', 'http://localhost:8080/api/auth/google/callback')
+
+
+@app.get('/auth/google/url')
+def google_auth_url():
+    """Retorna a URL de autorização OAuth2 do Google."""
+    if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
+        return json_error('Login com Google não configurado neste servidor.', 503)
+
+    import secrets as _secrets
+    state = _secrets.token_urlsafe(32)
+    session['oauth_state'] = state
+
+    params = {
+        'client_id': GOOGLE_CLIENT_ID,
+        'redirect_uri': GOOGLE_REDIRECT_URI,
+        'response_type': 'code',
+        'scope': 'openid email profile',
+        'state': state,
+        'access_type': 'offline',
+        'prompt': 'select_account',
+    }
+    from urllib.parse import urlencode
+    url = 'https://accounts.google.com/o/oauth2/v2/auth?' + urlencode(params)
+    return jsonify({'url': url})
+
+
+@app.get('/auth/google/callback')
+def google_auth_callback():
+    """Processa o callback do Google OAuth2 e autentica o usuário."""
+    import requests as _req
+
+    if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
+        return json_error('Login com Google não configurado neste servidor.', 503)
+
+    code = request.args.get('code', '')
+    state = request.args.get('state', '')
+    error = request.args.get('error', '')
+
+    if error:
+        return json_error(f'Autenticação Google cancelada: {error}', 400)
+
+    if not code:
+        return json_error('Código de autorização ausente.', 400)
+
+    expected_state = session.pop('oauth_state', None)
+    if not expected_state or state != expected_state:
+        return json_error('Estado OAuth inválido. Tente novamente.', 400)
+
+    try:
+        token_resp = _req.post(
+            'https://oauth2.googleapis.com/token',
+            data={
+                'code': code,
+                'client_id': GOOGLE_CLIENT_ID,
+                'client_secret': GOOGLE_CLIENT_SECRET,
+                'redirect_uri': GOOGLE_REDIRECT_URI,
+                'grant_type': 'authorization_code',
+            },
+            timeout=15,
+        )
+        token_resp.raise_for_status()
+        token_data = token_resp.json()
+    except Exception as exc:
+        app.logger.error('Erro ao trocar código Google por token: %s', exc)
+        return json_error('Falha ao autenticar com o Google. Tente novamente.', 502)
+
+    access_token = token_data.get('access_token', '')
+    if not access_token:
+        return json_error('Token de acesso Google ausente.', 502)
+
+    try:
+        userinfo_resp = _req.get(
+            'https://www.googleapis.com/oauth2/v3/userinfo',
+            headers={'Authorization': f'Bearer {access_token}'},
+            timeout=10,
+        )
+        userinfo_resp.raise_for_status()
+        userinfo = userinfo_resp.json()
+    except Exception as exc:
+        app.logger.error('Erro ao buscar userinfo Google: %s', exc)
+        return json_error('Falha ao obter dados do usuário Google.', 502)
+
+    google_id = userinfo.get('sub', '')
+    email = userinfo.get('email', '').strip().lower()
+    nome = userinfo.get('name', '') or userinfo.get('given_name', '') or email.split('@')[0]
+
+    if not google_id or not email:
+        return json_error('Dados insuficientes retornados pelo Google.', 502)
+
+    with session_scope() as db:
+        user = db.scalar(select(User).where(User.google_id == google_id))
+
+        if not user:
+            user = db.scalar(select(User).where(User.email == email))
+            if user:
+                user.google_id = google_id
+            else:
+                user = User(
+                    nome=nome,
+                    email=email,
+                    senha_hash=None,
+                    role='usuario',
+                    google_id=google_id,
+                )
+                db.add(user)
+                db.flush()
+
+        db.flush()
+        db.refresh(user)
+        session['user_id'] = int(user.id)
+
+    log_event('login_google', usuario_id=int(user.id), detalhe=f'email={email}')
+
+    frontend_url = os.getenv('FRONTEND_URL', 'http://localhost:8080')
+    from flask import redirect
+    return redirect(f'{frontend_url}/?google_login=1')
 
 
 # ---------------------------------------------------------------------------
@@ -864,3 +987,4 @@ def check_reset_token():
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=AUTH_PORT, debug=os.getenv('AUTH_DEBUG', '0') == '1')
+

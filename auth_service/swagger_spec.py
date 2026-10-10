@@ -358,6 +358,37 @@ OPENAPI_SPEC: dict[str, Any] = {
                 },
             }
         },
+        "/auth/google/url": {
+            "get": {
+                "tags": ["Autenticação"],
+                "summary": "Obter URL de autorização Google OAuth2",
+                "description": "Retorna a URL para redirecionar o usuário ao fluxo de autenticação Google.",
+                "responses": {
+                    "200": {
+                        "description": "URL de autorização",
+                        "content": {"application/json": {"example": {"url": "https://accounts.google.com/..."}}},
+                    },
+                    "503": {"description": "Google OAuth não configurado"},
+                },
+            }
+        },
+        "/auth/google/callback": {
+            "get": {
+                "tags": ["Autenticação"],
+                "summary": "Callback do Google OAuth2",
+                "description": "Recebe o code do Google, autentica o usuário e redireciona para o frontend.",
+                "parameters": [
+                    {"name": "code", "in": "query", "required": False, "schema": {"type": "string"}},
+                    {"name": "state", "in": "query", "required": False, "schema": {"type": "string"}},
+                    {"name": "error", "in": "query", "required": False, "schema": {"type": "string"}},
+                ],
+                "responses": {
+                    "302": {"description": "Redirecionamento para o frontend após autenticação"},
+                    "400": {"description": "Código ou estado inválido"},
+                    "502": {"description": "Falha na comunicação com o Google"},
+                },
+            }
+        },
     },
 }
 
