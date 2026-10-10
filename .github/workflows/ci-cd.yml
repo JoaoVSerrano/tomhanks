@@ -27,6 +27,14 @@ jobs:
       MINIO_ACCESS_KEY: test-minio-key
       MINIO_SECRET_KEY: test-minio-secret
       REDIS_URL: redis://localhost:6379/0
+      # Stripe — chaves de teste fictícias para os testes de webhook
+      STRIPE_SECRET_KEY: sk_test_ci_fake_key_for_testing_only
+      STRIPE_WEBHOOK_SECRET: whsec_ci_fake_webhook_secret_for_testing_only
+      STRIPE_PRICE_ID: price_ci_fake_price_id
+      STRIPE_PUBLISHABLE_KEY: pk_test_ci_fake_publishable_key
+      # Google OAuth — valores fictícios para CI
+      GOOGLE_CLIENT_ID: fake-google-client-id.apps.googleusercontent.com
+      GOOGLE_CLIENT_SECRET: fake-google-client-secret
 
     steps:
       - name: 📥 Checkout do repositório
@@ -41,7 +49,7 @@ jobs:
       - name: 📦 Instalar dependências Python de todos os serviços
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt -r auth_service/requirements.txt -r log_service/requirements.txt
+          pip install -r requirements.txt -r auth_service/requirements.txt -r log_service/requirements.txt -r payment_service/requirements.txt
           pip install pytest
 
       - name: 🧪 Executar suíte de testes pytest
@@ -135,6 +143,29 @@ jobs:
           push: true
           tags: ${{ steps.meta-log.outputs.tags }}
           labels: ${{ steps.meta-log.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # -----------------------------------------------------------------------
+      # 4. Build & Push: Payment Service (Assinaturas Stripe)
+      # -----------------------------------------------------------------------
+      - name: 🏷️ Extrair tags e rótulos para tomhanks-payment-service
+        id: meta-payment
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/tomhanks-payment-service
+          tags: |
+            type=raw,value=latest
+            type=sha,format=short,prefix=sha-
+
+      - name: 🚀 Build & Push tomhanks-payment-service
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.payment
+          push: true
+          tags: ${{ steps.meta-payment.outputs.tags }}
+          labels: ${{ steps.meta-payment.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
