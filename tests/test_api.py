@@ -36,6 +36,7 @@ def test_health_endpoint(client, monkeypatch):
         'database': 'connected',
         'auth_service': 'reachable',
         'log_service': 'reachable',
+        'payment_service': 'reachable',
         'minio': 'connected',
     }
 

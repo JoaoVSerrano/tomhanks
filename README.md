@@ -75,7 +75,8 @@ flowchart TD
 | Serviço | Container / Imagem | Porta Interna | Porta Publicada no Host | Exposição Pública | Finalidade |
 |---|---|---|---|---|---|
 | **app** | Build (`Dockerfile`) | 8080 | `${PORT:-8080}:8080` | **Sim** (Público) | Gateway reverso, API do catálogo e arquivos do frontend Angular |
-| **auth-service** | Build (`Dockerfile.auth`) | 3000 | *Nenhuma* | **Não** (Interno) | Microsserviço de autenticação, sessões, RBAC e perfil |
+| **auth-service** | Build (`Dockerfile.auth`) | 3000 | *Nenhuma* | **Não** (Interno) | Microsserviço de autenticação, sessões, RBAC, Google OAuth e perfil |
+| **payment-service** | Build (`Dockerfile.payment`) | 5000 | *Nenhuma* | **Não** (Interno) | Microsserviço de pagamentos, assinaturas Stripe e entitlement |
 | **log-service** | Build (`Dockerfile.log`) | 4000 | *Nenhuma* | **Não** (Interno) | Microsserviço de auditoria com persistência em Redis Streams |
 | **redis** | `redis:7-alpine` | 6379 | *Nenhuma* | **Não** (Interno) | Base de dados em memória para streams de log com persistência AOF |
 | **minio** | `cgr.dev/chainguard/minio:latest` | 9000, 9001 | *Nenhuma* (`expose: 9000, 9001`) | **Não** (Interno) | Object Storage S3 para fotos de perfil dos usuários |
@@ -157,6 +158,14 @@ No Portainer, a stack é criada diretamente a partir do repositório Git ou cola
 | `AUTH_ADMIN_NAME` | Opcional | Nome do usuário administrador inicial criado na inicialização |
 | `AUTH_ADMIN_EMAIL` | Opcional | E-mail para criação automática do usuário administrador inicial |
 | `AUTH_ADMIN_PASSWORD` | Opcional | Senha do administrador inicial (mínimo de 6 caracteres) |
+| `GOOGLE_CLIENT_ID` | Opcional | Client ID do Google OAuth 2.0 para login social |
+| `GOOGLE_CLIENT_SECRET` | Opcional | Client Secret do Google OAuth 2.0 |
+| `GOOGLE_REDIRECT_URI` | Opcional | URI de redirecionamento (padrão: `http://localhost:8080/api/auth/google/callback`) |
+| `STRIPE_SECRET_KEY` | Opcional | Chave secreta da Stripe (ex: `sk_test_...`) |
+| `STRIPE_PUBLISHABLE_KEY` | Opcional | Chave pública da Stripe para o frontend (`pk_test_...`) |
+| `STRIPE_WEBHOOK_SECRET` | Opcional | Chave de assinatura para validação dos webhooks da Stripe (`whsec_...`) |
+| `STRIPE_PRICE_ID` | Opcional | ID do preço recorrente do produto Premium na Stripe |
+| `ENTITLEMENT_CACHE_TTL` | Opcional | Tempo em segundos de cache Redis para entitlement (padrão: `300`) |
 | `SMTP_HOST` | Opcional | Host do provedor SMTP (ex: `sandbox.smtp.mailtrap.io`) |
 | `SMTP_PORT` | Opcional | Porta do servidor SMTP (ex: `587`) |
 | `SMTP_USER` | Opcional | Usuário de autenticação SMTP |
@@ -370,6 +379,7 @@ tomhanks/
 ├── docker-compose.yml         # Orquestração completa dos 7 serviços e rede tomhanks-net
 ├── Dockerfile                 # Container do gateway/catálogo
 ├── Dockerfile.auth            # Container do auth-service
+├── Dockerfile.payment         # Container do payment-service
 ├── Dockerfile.log             # Container do log-service
 ├── Dockerfile.prometheus      # Container customizado do Prometheus
 ├── Dockerfile.grafana         # Container customizado do Grafana com dashboards
@@ -379,6 +389,45 @@ tomhanks/
 ├── demo_swagger.sh            # Script de validação da documentação OpenAPI
 └── requirements.txt           # Dependências do catálogo e testes
 ```
+
+---
+
+## 💳 Pagamentos, Assinatura e Entitlement (Stripe)
+
+### Princípio da Fonte da Verdade
+A **Stripe é a única fonte da verdade**. O banco de dados local armazena estritamente o vínculo entre o `google_id` do usuário e o `stripe_customer_id` na tabela `stripe_customers`. Nenhum dado de cartão, validade, status de assinatura ou fatura é persistido localmente.
+
+### Ordem de Precedência dos Métodos de Verificação
+O direito à assinatura (entitlement) utiliza uma estratégia em camadas para conciliar alta performance e consistência absoluta:
+1. **Cache de Curta Duração no Redis (`TTL = 300s / 5min`)**: Reduz latência e consultas excessivas à API da Stripe em navegações frequentes.
+2. **Webhooks da Stripe com Invalidação Proativa**: Quando eventos críticos ocorrem (`checkout.session.completed`, `customer.subscription.updated`, `customer.subscription.deleted`), o cache Redis do usuário é imediatamente invalidado.
+3. **Consulta Direta à API da Stripe (`stripe.Subscription.list`)**: Caso a chave de cache tenha expirado ou não exista, ou em reconciliações onde o webhook ainda não foi entregue, o serviço consulta diretamente a API da Stripe em tempo real e reabastece o cache.
+
+### Como Testar Webhooks Localmente com Stripe CLI
+
+1. Instale o [Stripe CLI](https://stripe.com/docs/stripe-cli):
+   ```bash
+   # Exemplo no Linux
+   curl -s https://packages.stripe.com/GPG-KEY-stripe-cli | sudo apt-key add -
+   echo "deb https://packages.stripe.com/stripe-cli-debian-local stable main" | sudo tee -a /etc/apt/sources.list.d/stripe.list
+   sudo apt-get update && sudo apt-get install stripe
+   ```
+2. Faça login na sua conta de testes:
+   ```bash
+   stripe login
+   ```
+3. Inicie o encaminhamento de webhooks para o container ou aplicação local:
+   ```bash
+   stripe listen --forward-to localhost:8080/api/payment/webhook
+   ```
+4. O terminal exibirá uma mensagem como:
+   `> Ready! Your webhook signing secret is whsec_xxxxxxxxxxxx`
+   Copie este segredo e configure na variável `STRIPE_WEBHOOK_SECRET` no seu arquivo `.env`.
+5. Em outro terminal, dispare eventos de teste para verificar a idempotência:
+   ```bash
+   stripe trigger checkout.session.completed
+   stripe trigger customer.subscription.updated
+   ```
 
 ---
 

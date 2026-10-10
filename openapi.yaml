@@ -724,4 +724,104 @@ paths:
             application/json:
               example:
                 error: Acesso negado. Apenas administradores podem executar esta ação.
+  /api/auth/google/url:
+    get:
+      tags:
+      - Autenticação
+      summary: Obter URL de login com Google
+      responses:
+        '200':
+          description: URL gerada com sucesso
+  /api/auth/google/callback:
+    get:
+      tags:
+      - Autenticação
+      summary: Callback de autenticação do Google
+      responses:
+        '302':
+          description: Redirecionamento para o frontend
+  /api/payment/config:
+    get:
+      tags:
+      - Pagamentos
+      summary: Configurações públicas do Stripe
+      responses:
+        '200':
+          description: Configurações retornadas
+  /api/payment/checkout:
+    post:
+      tags:
+      - Pagamentos
+      summary: Iniciar checkout Stripe
+      responses:
+        '201':
+          description: Checkout criado
+  /api/payment/portal:
+    post:
+      tags:
+      - Pagamentos
+      summary: Abrir portal do cliente Stripe
+      responses:
+        '200':
+          description: URL do portal retornada
+  /api/payment/webhook:
+    post:
+      tags:
+      - Pagamentos
+      summary: Webhook de pagamentos Stripe
+      responses:
+        '200':
+          description: Evento processado
+  /api/premium/status:
+    get:
+      tags:
+      - Premium
+      summary: Status do usuário premium
+      responses:
+        '200':
+          description: Status retornado
+  /api/premium/watchlist:
+    get:
+      tags:
+      - Premium
+      summary: Watchlist de filmes dirigida/produzida por Tom Hanks
+      responses:
+        '200':
+          description: Filmes retornados
+        '402':
+          description: Pagamento necessário
+  /api/premium/insights:
+    get:
+      tags:
+      - Premium
+      summary: Insights e estatísticas de carreira
+      responses:
+        '200':
+          description: Insights retornados
+        '402':
+          description: Pagamento necessário
+  /api/admin/infra/health:
+    get:
+      tags:
+      - Administração & Auditoria
+      summary: Status de saúde detalhado de todos os microsserviços
+      responses:
+        '200':
+          description: Status retornado
+  /api/admin/infra/redis:
+    get:
+      tags:
+      - Administração & Auditoria
+      summary: Informações e estatísticas do Redis
+      responses:
+        '200':
+          description: Info retornada
+  /api/admin/infra/swagger-links:
+    get:
+      tags:
+      - Administração & Auditoria
+      summary: Links para o Swagger de cada microsserviço
+      responses:
+        '200':
+          description: Links retornados
 
