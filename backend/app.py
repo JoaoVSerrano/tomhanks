@@ -52,6 +52,10 @@ def log_service_url() -> str:
     return os.getenv('LOG_SERVICE_URL', 'http://log-service:4000')
 
 
+def payment_service_url() -> str:
+    return os.getenv('PAYMENT_SERVICE_URL', 'http://payment-service:5000')
+
+
 def minio_is_ready() -> bool:
     """Confere conectividade com o object storage usado pelos avatares."""
     try:
@@ -390,6 +394,7 @@ def health():
     db_ok = False
     auth_ok = False
     log_ok = False
+    payment_ok = False
     minio_ok = minio_is_ready()
 
     try:
@@ -411,6 +416,12 @@ def health():
     except Exception:
         log_ok = False
 
+    try:
+        resp = requests.get(f"{payment_service_url()}/health", timeout=2)
+        payment_ok = resp.status_code == 200
+    except Exception:
+        payment_ok = False
+
     status_code = 200 if (db_ok and auth_ok and log_ok and minio_ok) else 503
     return jsonify({
         'status': 'healthy' if status_code == 200 else 'unhealthy',
@@ -419,6 +430,7 @@ def health():
             'database': 'connected' if db_ok else 'disconnected',
             'auth_service': 'reachable' if auth_ok else 'unreachable',
             'log_service': 'reachable' if log_ok else 'unreachable',
+            'payment_service': 'reachable' if payment_ok else 'unreachable',
             'minio': 'connected' if minio_ok else 'disconnected',
         }
     }), status_code
@@ -549,8 +561,411 @@ def admin_list_logs():
 
 
 # ---------------------------------------------------------------------------
-# Perfil de usuário & Upload de Avatar (Atividade 6)
+# Google OAuth — proxy para o auth-service
 # ---------------------------------------------------------------------------
+
+@app.get('/api/auth/google/url')
+def google_auth_url():
+    """Retorna a URL de autorização OAuth2 do Google para o frontend iniciar o fluxo."""
+    return _proxy_auth('GET', '/auth/google/url')
+
+
+@app.get('/api/auth/google/callback')
+def google_auth_callback():
+    """Recebe o callback do Google e repassa ao auth-service, que autentica e redireciona."""
+    qs = request.query_string.decode('utf-8')
+    return _proxy_auth('GET', f'/auth/google/callback?{qs}')
+
+
+# ---------------------------------------------------------------------------
+# Payment — proxy para o payment-service (assinatura Stripe)
+# ---------------------------------------------------------------------------
+
+def _forward_to_payment(method: str, path: str, **kwargs) -> requests.Response:
+    """Encaminha uma requisição ao microsserviço de pagamentos."""
+    url = f'{payment_service_url()}{path}'
+    headers = kwargs.pop('headers', {})
+    headers['X-Internal-Token'] = internal_token()
+    return requests.request(method, url, headers=headers, timeout=30, **kwargs)
+
+
+@app.get('/api/payment/config')
+def payment_config():
+    """Retorna configurações públicas do payment-service (publishable key)."""
+    return jsonify({
+        'stripe_publishable_key': os.getenv('STRIPE_PUBLISHABLE_KEY', ''),
+        'payments_enabled': bool(os.getenv('STRIPE_PUBLISHABLE_KEY', '')),
+    })
+
+
+@app.post('/api/payment/checkout')
+def payment_checkout():
+    """Inicia Stripe Checkout Session. Requer autenticação e google_id."""
+    user_data, err = require_role('usuario')
+    if err:
+        # Tenta pegar usuário mesmo sem role específica
+        try:
+            resp = _forward_to_auth('GET', '/me')
+            if resp.status_code != 200:
+                return json_error('Faça login para assinar.', 401)
+            user_data = resp.json().get('user', {})
+        except Exception:
+            return json_error('Serviço de autenticação indisponível.', 503)
+
+    google_id = user_data.get('google_id', '') if user_data else ''
+    email = user_data.get('email', '') if user_data else ''
+
+    if not google_id:
+        return json_error(
+            'Login com Google obrigatório para assinatura premium. '
+            'Faça login com Google e tente novamente.', 403
+        )
+
+    try:
+        resp = _forward_to_payment('POST', '/checkout', json={'google_id': google_id, 'email': email})
+        return jsonify(resp.json()), resp.status_code
+    except requests.RequestException as exc:
+        app.logger.error('payment-service indisponível em checkout: %s', exc)
+        return json_error('Serviço de pagamentos indisponível.', 503)
+
+
+@app.post('/api/payment/portal')
+def payment_portal():
+    """Abre o Stripe Customer Portal para o usuário gerenciar ou cancelar."""
+    try:
+        resp = _forward_to_auth('GET', '/me')
+        if resp.status_code != 200:
+            return json_error('Faça login para continuar.', 401)
+        user_data = resp.json().get('user', {})
+    except Exception:
+        return json_error('Serviço de autenticação indisponível.', 503)
+
+    google_id = user_data.get('google_id', '') if user_data else ''
+    if not google_id:
+        return json_error('Login com Google obrigatório para gerenciar assinatura.', 403)
+
+    try:
+        resp = _forward_to_payment('POST', '/portal', json={'google_id': google_id})
+        return jsonify(resp.json()), resp.status_code
+    except requests.RequestException as exc:
+        app.logger.error('payment-service indisponível em portal: %s', exc)
+        return json_error('Serviço de pagamentos indisponível.', 503)
+
+
+@app.post('/api/payment/webhook')
+def payment_webhook():
+    """Repassa webhooks da Stripe ao payment-service (preserva payload e headers)."""
+    try:
+        raw_body = request.get_data()
+        sig_header = request.headers.get('Stripe-Signature', '')
+        resp = _forward_to_payment(
+            'POST',
+            '/webhook',
+            data=raw_body,
+            headers={'Stripe-Signature': sig_header, 'Content-Type': 'application/json'},
+        )
+        return jsonify(resp.json()), resp.status_code
+    except requests.RequestException as exc:
+        app.logger.error('payment-service indisponível em webhook: %s', exc)
+        return json_error('Serviço de pagamentos indisponível.', 503)
+
+
+def _check_premium_entitlement() -> tuple[bool, dict[str, Any]]:
+    """Consulta o payment-service e retorna (has_premium, entitlement_data)."""
+    try:
+        resp_me = _forward_to_auth('GET', '/me')
+        if resp_me.status_code != 200:
+            return False, {}
+        user_data = resp_me.json().get('user', {})
+    except Exception:
+        return False, {}
+
+    google_id = user_data.get('google_id', '') if user_data else ''
+    if not google_id:
+        return False, {'has_premium': False, 'status': 'no_google_id'}
+
+    try:
+        resp = _forward_to_payment('GET', f'/entitlement?google_id={google_id}')
+        if resp.status_code == 200:
+            data = resp.json()
+            return bool(data.get('has_premium')), data
+    except Exception as exc:
+        app.logger.warning('payment-service indisponível em entitlement: %s', exc)
+
+    return False, {}
+
+
+# ---------------------------------------------------------------------------
+# Premium — conteúdo exclusivo para assinantes (Fase 3)
+# ---------------------------------------------------------------------------
+
+@app.get('/api/premium/status')
+def premium_status():
+    """Retorna o status de assinatura premium do usuário autenticado."""
+    user_id, err = require_login()
+    if err:
+        return err
+
+    has_premium, entitlement = _check_premium_entitlement()
+    return jsonify({
+        'has_premium': has_premium,
+        'entitlement': entitlement,
+    })
+
+
+@app.get('/api/premium/watchlist')
+def premium_watchlist():
+    """Lista de filmes em que Tom Hanks participou como diretor ou produtor (conteúdo premium).
+
+    Retorna 402 se o usuário não possui assinatura ativa.
+    """
+    user_id, err = require_login()
+    if err:
+        return err
+
+    has_premium, _ = _check_premium_entitlement()
+    if not has_premium:
+        return json_error(
+            'Esta funcionalidade é exclusiva para assinantes premium. '
+            'Assine para desbloquear.',
+            402,
+        )
+
+    try:
+        person_id = get_tom_hanks_person_id()
+        payload = tmdb_request(f'/person/{person_id}/movie_credits')
+        crew_movies = payload.get('crew', [])
+
+        seen_ids: set[int] = set()
+        result = []
+        for movie in sorted(
+            crew_movies,
+            key=lambda m: (m.get('release_date') or '0000-00-00', m.get('popularity') or 0),
+            reverse=True,
+        ):
+            movie_id = int(movie.get('id', 0))
+            if not movie_id or movie_id in seen_ids:
+                continue
+            job = movie.get('job', '').lower()
+            if job not in ('director', 'producer', 'executive producer', 'writer'):
+                continue
+            seen_ids.add(movie_id)
+            result.append({
+                'tmdb_movie_id': movie_id,
+                'title': movie.get('title') or movie.get('original_title') or 'Título indisponível',
+                'overview': movie.get('overview') or 'Sinopse indisponível.',
+                'poster_path': movie.get('poster_path'),
+                'poster_url': normalize_poster_path(movie.get('poster_path')),
+                'release_date': movie.get('release_date'),
+                'job': movie.get('job'),
+                'department': movie.get('department'),
+            })
+            if len(result) >= 12:
+                break
+
+        log_event('premium_watchlist', usuario_id=user_id)
+        return jsonify({'movies': result, 'count': len(result)})
+    except Exception as exc:
+        app.logger.error('Falha ao buscar watchlist premium: %s', exc)
+        return json_error('Não foi possível carregar o conteúdo premium.', 502)
+
+
+@app.get('/api/premium/insights')
+def premium_insights():
+    """Retorna estatísticas de carreira do Tom Hanks como conteúdo premium.
+
+    Inclui: filmes por década, rating médio, gêneros predominantes.
+    Retorna 402 se o usuário não possui assinatura ativa.
+    """
+    user_id, err = require_login()
+    if err:
+        return err
+
+    has_premium, _ = _check_premium_entitlement()
+    if not has_premium:
+        return json_error(
+            'Esta funcionalidade é exclusiva para assinantes premium. '
+            'Assine para desbloquear.',
+            402,
+        )
+
+    try:
+        catalog = get_tom_hanks_catalog()
+
+        movies_by_decade: dict[str, int] = {}
+        total_vote = 0.0
+        vote_count = 0
+        genres: dict[str, int] = {}
+
+        for movie in catalog:
+            # Dekada
+            date = movie.get('release_date') or ''
+            if date and len(date) >= 4:
+                year = int(date[:4])
+                decade = f'{(year // 10) * 10}s'
+                movies_by_decade[decade] = movies_by_decade.get(decade, 0) + 1
+
+        # Busca detalhes adicionais via TMDB para ratings/gêneros
+        for movie in catalog[:10]:  # limita para não sobrecarregar a API
+            try:
+                details = tmdb_request(f'/movie/{movie["tmdb_movie_id"]}')
+                if details.get('vote_average', 0) > 0:
+                    total_vote += details['vote_average']
+                    vote_count += 1
+                for genre in details.get('genres', []):
+                    name = genre.get('name', '')
+                    if name:
+                        genres[name] = genres.get(name, 0) + 1
+            except Exception:
+                continue
+
+        avg_rating = round(total_vote / vote_count, 2) if vote_count > 0 else None
+        top_genres = sorted(genres.items(), key=lambda x: x[1], reverse=True)[:5]
+
+        log_event('premium_insights', usuario_id=user_id)
+        return jsonify({
+            'total_movies': len(catalog),
+            'movies_by_decade': movies_by_decade,
+            'average_rating': avg_rating,
+            'top_genres': [{'genre': g, 'count': c} for g, c in top_genres],
+        })
+    except Exception as exc:
+        app.logger.error('Falha ao calcular insights premium: %s', exc)
+        return json_error('Não foi possível calcular os insights.', 502)
+
+
+# ---------------------------------------------------------------------------
+# Admin Infraestrutura — status de todos os serviços, Redis, Swagger links
+# ---------------------------------------------------------------------------
+
+@app.get('/api/admin/infra/health')
+def admin_infra_health():
+    """Retorna o status detalhado de todos os serviços. Exclusivo de admin."""
+    _, err = require_role('admin')
+    if err:
+        return err
+
+    services: list[dict[str, Any]] = []
+
+    def _check(name: str, url: str, timeout: int = 3) -> dict[str, Any]:
+        try:
+            resp = requests.get(url, timeout=timeout)
+            return {
+                'name': name,
+                'status': 'healthy' if resp.status_code == 200 else 'degraded',
+                'http_status': resp.status_code,
+                'details': resp.json() if resp.headers.get('content-type', '').startswith('application/json') else {},
+            }
+        except Exception as exc:
+            return {'name': name, 'status': 'unreachable', 'http_status': None, 'error': str(exc)}
+
+    services.append(_check('app-gateway', f'http://localhost:{os.getenv("PORT", "8080")}/api/health'))
+    services.append(_check('auth-service', f'{auth_service_url()}/health'))
+    services.append(_check('log-service', f'{log_service_url()}/health'))
+    services.append(_check('payment-service', f'{payment_service_url()}/health'))
+
+    all_healthy = all(s['status'] == 'healthy' for s in services)
+    return jsonify({
+        'overall': 'healthy' if all_healthy else 'degraded',
+        'services': services,
+    })
+
+
+@app.get('/api/admin/infra/redis')
+def admin_infra_redis():
+    """Retorna informações do Redis: estado do serviço e streams de auditoria. Exclusivo de admin."""
+    _, err = require_role('admin')
+    if err:
+        return err
+
+    try:
+        import redis as _redis
+        r = _redis.from_url(os.getenv('REDIS_URL', 'redis://redis:6379/0'), decode_responses=True)
+        r.ping()
+
+        info = r.info('server')
+        memory = r.info('memory')
+        stream_info: dict[str, Any] = {}
+
+        try:
+            stream_len = r.xlen('audit:logs')
+            stream_info = {
+                'stream_key': 'audit:logs',
+                'length': stream_len,
+            }
+        except Exception:
+            stream_info = {'stream_key': 'audit:logs', 'length': None, 'error': 'Stream indisponível'}
+
+        return jsonify({
+            'status': 'connected',
+            'version': info.get('redis_version'),
+            'uptime_seconds': info.get('uptime_in_seconds'),
+            'connected_clients': info.get('connected_clients'),
+            'used_memory_human': memory.get('used_memory_human'),
+            'maxmemory_human': memory.get('maxmemory_human') or 'sem limite',
+            'streams': [stream_info],
+        })
+    except Exception as exc:
+        app.logger.error('Erro ao conectar ao Redis em admin_infra_redis: %s', exc)
+        return jsonify({'status': 'disconnected', 'error': str(exc)}), 503
+
+
+@app.get('/api/admin/infra/swagger-links')
+def admin_infra_swagger_links():
+    """Retorna links de Swagger/OpenAPI de todos os serviços. Exclusivo de admin."""
+    _, err = require_role('admin')
+    if err:
+        return err
+
+    base = request.host_url.rstrip('/')
+    return jsonify({
+        'services': [
+            {
+                'name': 'Catálogo (Gateway)',
+                'swagger_ui': f'{base}/apidocs',
+                'openapi_json': f'{base}/api/docs/openapi.json',
+            },
+            {
+                'name': 'auth-service',
+                'swagger_ui': f'{auth_service_url()}/apidocs',
+                'openapi_json': f'{base}/api/docs/auth/openapi.json',
+            },
+            {
+                'name': 'log-service',
+                'swagger_ui': f'{log_service_url()}/apidocs',
+                'openapi_json': f'{base}/api/docs/log/openapi.json',
+            },
+            {
+                'name': 'payment-service',
+                'swagger_ui': f'{payment_service_url()}/apidocs',
+                'openapi_json': f'{base}/api/docs/payment/openapi.json',
+            },
+        ]
+    })
+
+
+@app.get('/api/docs/payment/openapi.json')
+def payment_openapi_json():
+    """Proxy para a especificação OpenAPI 3.0 do payment-service."""
+    try:
+        resp = requests.get(f'{payment_service_url()}/api/docs/openapi.json', timeout=2)
+        if resp.status_code == 200:
+            return Response(resp.content, content_type='application/json; charset=utf-8')
+    except Exception as exc:
+        app.logger.warning('Falha ao obter especificação OpenAPI do payment-service: %s', exc)
+
+    fallback = {
+        "openapi": "3.0.3",
+        "info": {
+            "title": "payment-service (Indisponível)",
+            "description": "O microsserviço de pagamentos está temporariamente inacessível na rede Docker.",
+            "version": "1.0.0"
+        },
+        "paths": {}
+    }
+    return jsonify(fallback)
+
+
 
 @app.get('/api/profile/<int:user_id>')
 def get_user_profile(user_id: int):
@@ -731,7 +1146,8 @@ def swagger_ui():
         urls: [
           { url: "/api/docs/openapi.json", name: "Catálogo (Gateway)" },
           { url: "/api/docs/auth/openapi.json", name: "auth-service" },
-          { url: "/api/docs/log/openapi.json", name: "log-service" }
+          { url: "/api/docs/log/openapi.json", name: "log-service" },
+          { url: "/api/docs/payment/openapi.json", name: "payment-service" }
         ],
         "urls.primaryName": "Catálogo (Gateway)",
         dom_id: '#swagger-ui',
