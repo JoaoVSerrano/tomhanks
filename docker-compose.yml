@@ -1,6 +1,6 @@
 services:
   # ─────────────────────────────────────────────────────────────────────────
-  # Redis — banco de dados do log-service (Redis Streams)
+  # Redis — banco de dados do log-service (Redis Streams) e cache do payment
   # ─────────────────────────────────────────────────────────────────────────
   redis:
     image: redis:7-alpine
@@ -105,6 +105,10 @@ services:
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:8080}
       INTERNAL_TOKEN: ${INTERNAL_TOKEN:?defina INTERNAL_TOKEN nas variáveis da stack}
       LOG_SERVICE_URL: http://log-service:4000
+      # Google OAuth — opcional (sem Google OAuth, botão não aparece)
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-http://localhost:8080/api/auth/google/callback}
     depends_on:
       - log-service
       - minio
@@ -115,6 +119,47 @@ services:
       interval: 15s
       timeout: 5s
       retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Microsserviço de pagamentos — Stripe (Assinaturas Premium)
+  # ─────────────────────────────────────────────────────────────────────────
+  payment-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.payment
+    environment:
+      PAYMENT_PORT: 5000
+      # Banco remoto — obrigatório, sem fallback
+      DB_HOST: ${DB_HOST:?defina DB_HOST nas variáveis da stack}
+      DB_PORT: ${DB_PORT:?defina DB_PORT nas variáveis da stack}
+      DB_USER: ${DB_USER:?defina DB_USER nas variáveis da stack}
+      DB_PASSWORD: ${DB_PASSWORD:?defina DB_PASSWORD nas variáveis da stack}
+      DB_NAME: ${DB_NAME:?defina DB_NAME nas variáveis da stack}
+      REDIS_URL: redis://redis:6379/0
+      INTERNAL_TOKEN: ${INTERNAL_TOKEN:?defina INTERNAL_TOKEN nas variáveis da stack}
+      LOG_SERVICE_URL: http://log-service:4000
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:8080}
+      # Stripe — obrigatório para pagamentos (use chaves de teste: sk_test_... / pk_test_...)
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      STRIPE_PRICE_ID: ${STRIPE_PRICE_ID:-}
+      STRIPE_SUCCESS_URL: ${STRIPE_SUCCESS_URL:-http://localhost:8080/?payment=success}
+      STRIPE_CANCEL_URL: ${STRIPE_CANCEL_URL:-http://localhost:8080/?payment=cancel}
+      # Cache de entitlement — padrão 5 minutos
+      ENTITLEMENT_CACHE_TTL: ${ENTITLEMENT_CACHE_TTL:-300}
+    depends_on:
+      - redis
+      - log-service
+    networks:
+      - tomhanks-net
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:5000/health\")' || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
       start_period: 30s
     restart: unless-stopped
 
@@ -147,12 +192,17 @@ services:
       MINIO_BUCKET_NAME: ${MINIO_BUCKET_NAME:-tomhanks-avatars}
       MINIO_PUBLIC_URL: ${MINIO_PUBLIC_URL:-http://localhost:9000/tomhanks-avatars}
       AUTH_SERVICE_URL: http://auth-service:3000
+      PAYMENT_SERVICE_URL: http://payment-service:5000
       INTERNAL_TOKEN: ${INTERNAL_TOKEN:?defina INTERNAL_TOKEN nas variáveis da stack}
       LOG_SERVICE_URL: http://log-service:4000
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:8080}
+      # Stripe — publishable key para o frontend iniciar checkout
+      STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-}
     ports:
       - "${PORT:-8080}:${PORT:-8080}"
     depends_on:
       - auth-service
+      - payment-service
       - log-service
       - minio
     networks:
