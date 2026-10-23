@@ -1,3 +1,5 @@
+Este projeto continua em github.com/JoaoVSerrano/OficinaOS.
+
 # Catálogo de Filmes — Tom Hanks 🎬
 
 > Desenvolvido para a disciplina **ISW055 – Introdução à Computação em Nuvem**  
