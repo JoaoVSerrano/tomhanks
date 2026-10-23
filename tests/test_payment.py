@@ -10,6 +10,7 @@ Cobre as regras principais:
 from __future__ import annotations
 
 import json
+import os
 import unittest.mock as mock
 from unittest.mock import MagicMock, patch
 
@@ -37,7 +38,7 @@ def payment_app():
 @pytest.fixture
 def internal_headers():
     """Cabeçalhos de token interno para chamadas internas."""
-    return {'X-Internal-Token': 'test-internal-token-1234567890'}
+    return {'X-Internal-Token': os.environ['INTERNAL_TOKEN']}
 
 
 # ────────────────────────────────────────────────────────────────────────────
