@@ -1,4 +1,4 @@
-Este projeto continua em github.com/JoaoVSerrano/OficinaOS.
+Este projeto continua em [github.com/JoaoVSerrano/OficinaOS](https://github.com/JoaoVSerrano/OficinaOS).
 
 # Catálogo de Filmes — Tom Hanks 🎬
 
